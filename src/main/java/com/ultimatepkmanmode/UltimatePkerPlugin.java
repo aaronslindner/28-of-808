@@ -13,6 +13,7 @@ import javax.inject.Inject;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.IndexedSprite;
+import net.runelite.api.SoundEffectID;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameTick;
@@ -152,6 +153,7 @@ public class UltimatePkerPlugin extends Plugin
 		{
 			event.consume();
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Banking is disabled.", null);
+			client.playSoundEffect(SoundEffectID.UI_BOOP);
 			return;
 		}
 
@@ -186,6 +188,7 @@ public class UltimatePkerPlugin extends Plugin
 				{
 					event.consume();
 					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", reason, null);
+					client.playSoundEffect(SoundEffectID.UI_BOOP);
 				}
 				return;
 			}
@@ -217,6 +220,7 @@ public class UltimatePkerPlugin extends Plugin
 						tradePassedFirstScreen = false;
 						event.consume();
 						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", reason, null);
+						client.playSoundEffect(SoundEffectID.UI_BOOP);
 					}
 					else
 					{
@@ -320,7 +324,8 @@ public class UltimatePkerPlugin extends Plugin
 		final long max = market + delta;
 		if (price < min || price > max)
 		{
-			return "GE offer blocked: price must be within +/-" + limitPct + "% (max +/-" + formatGp(capGp) + ") of market (" + formatGp(market) + ").";
+			final long clamped = price < min ? min : max;
+			return "GE offer blocked: try " + formatGp(clamped) + " (within +/-" + limitPct + "% of " + formatGp(market) + " market).";
 		}
 
 		return null;
