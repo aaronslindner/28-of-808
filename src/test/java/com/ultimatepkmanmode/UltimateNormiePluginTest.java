@@ -3,11 +3,11 @@ package com.ultimatepkmanmode;
 import net.runelite.client.RuneLite;
 import net.runelite.client.externalplugins.ExternalPluginManager;
 
-public class UltimatePkerPluginTest
+public class UltimateNormiePluginTest
 {
 	public static void main(String[] args) throws Exception
 	{
-		ExternalPluginManager.loadBuiltin(UltimatePkerPlugin.class);
+		ExternalPluginManager.loadBuiltin(UltimateNormiePlugin.class);
 		RuneLite.main(args);
 	}
 }

@@ -17,10 +17,10 @@ public class TradeBalanceOverlay extends Overlay
 {
 	private final Client client;
 	private final ItemManager itemManager;
-	private final UltimatePkerPlugin plugin;
+	private final UltimateNormiePlugin plugin;
 
 	@Inject
-	public TradeBalanceOverlay(Client client, ItemManager itemManager, UltimatePkerPlugin plugin)
+	public TradeBalanceOverlay(Client client, ItemManager itemManager, UltimateNormiePlugin plugin)
 	{
 		this.client = client;
 		this.itemManager = itemManager;

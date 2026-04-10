@@ -1,6 +1,5 @@
 package com.ultimatepkmanmode;
 
-import com.google.inject.Provides;
 import java.math.RoundingMode;
 import java.text.DecimalFormat;
 import java.util.ArrayDeque;
@@ -13,13 +12,13 @@ import javax.inject.Inject;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.IndexedSprite;
-import net.runelite.api.SoundEffectID;
+import net.runelite.api.SoundEffectVolume;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.widgets.Widget;
-import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
@@ -28,19 +27,25 @@ import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.Text;
 
 @PluginDescriptor(
-	name = "Ultimate Pker",
+	name = "Ultimate Normie Mode",
 	description = "Restrictions on banking, trading and the GE"
 )
-public class UltimatePkerPlugin extends Plugin
+public class UltimateNormiePlugin extends Plugin
 {
+	private static final boolean DISABLE_BANKING = true;
+	private static final int LIMIT_PCT = 10;
+	private static final long ABSOLUTE_CAP_GP = 5_000_000;
+
 	private int gameTick = 0;
 	private int geClickedNonSubmitTick = -1;
 	private int tradeClickedNonAcceptTick = -1;
 	private boolean tradePassedFirstScreen = false;
+	private boolean pendingBoop = false;
+	private int tradeItemChangedTick = -1;
 
 	public int getLimitPct()
 	{
-		return config.limitPercent();
+		return LIMIT_PCT;
 	}
 
 	private static boolean isBankInteraction(String option, String target)
@@ -49,13 +54,17 @@ public class UltimatePkerPlugin extends Plugin
 		{
 			return false;
 		}
+		if (option.equals("bank") || option.startsWith("deposit"))
+		{
+			return true;
+		}
 		final String t = target == null ? "" : target;
-		final boolean bankLikeTarget = t.contains("bank") || t.contains("banker") || t.contains("deposit") || t.contains("chest");
+		final boolean bankLikeTarget = t.contains("bank") || t.contains("banker") || t.contains("deposit");
 		if (!bankLikeTarget)
 		{
 			return false;
 		}
-		return option.contains("bank") || option.contains("deposit") || option.contains("withdraw") || option.contains("collect");
+		return option.contains("use") || option.contains("withdraw") || option.contains("collect");
 	}
 
 	public static String formatGp(long gp)
@@ -85,7 +94,7 @@ public class UltimatePkerPlugin extends Plugin
 
 	public long getAbsoluteCapGp()
 	{
-		return config.absoluteCapGp();
+		return ABSOLUTE_CAP_GP;
 	}
 
 	@Inject
@@ -98,22 +107,13 @@ public class UltimatePkerPlugin extends Plugin
 	private ItemManager itemManager;
 
 	@Inject
-	private UltimatePkerConfig config;
-
-	@Inject
 	private TradeBalanceOverlay tradeBalanceOverlay;
 
 	@Inject
-	private UltimatePkerChatPromptSkullOverlay chatPromptSkullOverlay;
+	private UltimateNormieChatPromptSkullOverlay chatPromptSkullOverlay;
 
 	private IndexedSprite[] priorModIcons;
 	private int skullModIconIndex = -1;
-
-	@Provides
-	UltimatePkerConfig provideConfig(ConfigManager configManager)
-	{
-		return configManager.getConfig(UltimatePkerConfig.class);
-	}
 
 	@Override
 	protected void startUp()
@@ -136,10 +136,25 @@ public class UltimatePkerPlugin extends Plugin
 	{
 		gameTick++;
 
-		// Reset first-screen flag when neither trade screen is open
+		if (pendingBoop)
+		{
+			client.playSoundEffect(2277, SoundEffectVolume.MEDIUM_HIGH);
+			pendingBoop = false;
+		}
+
 		if (client.getWidget(335, 10) == null && client.getWidget(334, 13) == null)
 		{
 			tradePassedFirstScreen = false;
+		}
+	}
+
+	@Subscribe
+	public void onItemContainerChanged(ItemContainerChanged event)
+	{
+		if (client.getWidget(335, 10) != null)
+		{
+			tradePassedFirstScreen = false;
+			tradeItemChangedTick = gameTick;
 		}
 	}
 
@@ -149,17 +164,11 @@ public class UltimatePkerPlugin extends Plugin
 		final String option = Text.standardize(event.getMenuOption());
 		final String target = Text.standardize(event.getMenuTarget());
 
-		if (config.disableBanking() && isBankInteraction(option, target))
+		if (DISABLE_BANKING && isBankInteraction(option, target))
 		{
 			event.consume();
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Banking is disabled.", null);
-			client.playSoundEffect(SoundEffectID.UI_BOOP);
-			return;
-		}
-
-		final int limitPct = config.limitPercent();
-		if (limitPct <= 0)
-		{
+			pendingBoop = true;
 			return;
 		}
 
@@ -176,19 +185,19 @@ public class UltimatePkerPlugin extends Plugin
 
 			if (isSubmitLike)
 			{
-				// Block if another GE click happened this exact tick (same-tick exploit guard)
-				if (geClickedNonSubmitTick == gameTick)
+				// Block if a price/quantity change happened within the last 1 tick
+				if (gameTick - geClickedNonSubmitTick < 1)
 				{
 					event.consume();
 					return;
 				}
 
-				final String reason = validateGeOffer(limitPct);
+				final String reason = validateGeOffer();
 				if (reason != null)
 				{
 					event.consume();
 					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", reason, null);
-					client.playSoundEffect(SoundEffectID.UI_BOOP);
+					pendingBoop = true;
 				}
 				return;
 			}
@@ -214,13 +223,19 @@ public class UltimatePkerPlugin extends Plugin
 				// First trade screen: validate from offer widgets
 				if (tradeScreen1 != null)
 				{
-					final String reason = validateTrade(limitPct);
+					// Block if items changed within the last 5 ticks (~3s stabilisation window)
+					if (gameTick - tradeItemChangedTick < 5)
+					{
+						event.consume();
+						return;
+					}
+					final String reason = validateTrade();
 					if (reason != null)
 					{
 						tradePassedFirstScreen = false;
 						event.consume();
 						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", reason, null);
-						client.playSoundEffect(SoundEffectID.UI_BOOP);
+						pendingBoop = true;
 					}
 					else
 					{
@@ -230,9 +245,12 @@ public class UltimatePkerPlugin extends Plugin
 				}
 
 				// Second trade screen: block if first screen validation failed
-				if (tradeScreen2 != null && !tradePassedFirstScreen)
+				if (tradeScreen2 != null)
 				{
-					event.consume();
+					if (!tradePassedFirstScreen)
+					{
+						event.consume();
+					}
 				}
 				return;
 			}
@@ -242,20 +260,22 @@ public class UltimatePkerPlugin extends Plugin
 		}
 	}
 
-	private String validateGeOffer(int limitPct)
+	private String validateGeOffer()
 	{
-		final Widget offer = client.getWidget(465, 24);
+		final Widget offer = client.getWidget(465, 26);
 		if (offer == null)
 		{
 			return null;
 		}
 
 		final List<Widget> widgets = flattenWidgetTree(offer);
+
+		// Find the actual item being traded (skip GE placeholder 6512)
 		Integer itemId = null;
 		for (Widget w : widgets)
 		{
 			final int id = w.getItemId();
-			if (id > 0)
+			if (id > 0 && id != 6512)
 			{
 				itemId = id;
 				break;
@@ -266,42 +286,18 @@ public class UltimatePkerPlugin extends Plugin
 			return null;
 		}
 
+		// Find the per-item price from text containing "coins"
 		Integer price = null;
-		Integer qty = null;
-		for (int i = 0; i < widgets.size(); i++)
+		for (Widget w : widgets)
 		{
-			final Widget w = widgets.get(i);
 			final String t = w.getText();
-			if (t == null)
+			if (t != null && t.contains("coins"))
 			{
-				continue;
-			}
-			final String st = Text.standardize(t);
-
-			if (price == null && st.contains("price per item"))
-			{
-				for (int j = i; j < Math.min(i + 6, widgets.size()); j++)
+				final Integer parsed = parseFirstInteger(t);
+				if (parsed != null)
 				{
-					final Integer parsed = parseFirstInteger(widgets.get(j).getText());
-					if (parsed != null)
-					{
-						price = parsed;
-						break;
-					}
-				}
-				continue;
-			}
-
-			if (qty == null && st.equals("quantity:"))
-			{
-				for (int j = i; j < Math.min(i + 6, widgets.size()); j++)
-				{
-					final Integer parsed = parseFirstInteger(widgets.get(j).getText());
-					if (parsed != null)
-					{
-						qty = parsed;
-						break;
-					}
+					price = parsed;
+					break;
 				}
 			}
 		}
@@ -317,15 +313,14 @@ public class UltimatePkerPlugin extends Plugin
 			return "GE offer blocked: market price unavailable.";
 		}
 
-		final long capGp = config.absoluteCapGp();
-		final long deltaPct = (long) Math.floor(market * (limitPct / 100.0));
-		final long delta = Math.min(deltaPct, capGp);
+		final long deltaPct = (long) Math.floor(market * (LIMIT_PCT / 100.0));
+		final long delta = Math.min(deltaPct, ABSOLUTE_CAP_GP);
 		final long min = market - delta;
 		final long max = market + delta;
 		if (price < min || price > max)
 		{
 			final long clamped = price < min ? min : max;
-			return "GE offer blocked: try " + formatGp(clamped) + " (within +/-" + limitPct + "% of " + formatGp(market) + " market).";
+			return "GE offer blocked: Try " + String.format("%,d", clamped) + " gp.";
 		}
 
 		return null;
@@ -394,7 +389,7 @@ public class UltimatePkerPlugin extends Plugin
 		return null;
 	}
 
-	private String validateTrade(int limitPct)
+	private String validateTrade()
 	{
 		final Widget ourOffer = client.getWidget(335, 25);
 		final Widget theirOffer = client.getWidget(335, 28);
@@ -421,15 +416,20 @@ public class UltimatePkerPlugin extends Plugin
 			return null;
 		}
 
-		final long capGp = config.absoluteCapGp();
-		final long pctDelta = (long) Math.floor(theirValue * (limitPct / 100.0));
-		final long allowed = Math.min(pctDelta, capGp);
+		if (theirValue == 0)
+		{
+			return "Trade blocked: Your offer (" + String.format("%,d", ourValue) + " gp) is too high. Your trade partner has not offered anything of value yet.";
+		}
+
+		final long pctDelta = (long) Math.floor(theirValue * (LIMIT_PCT / 100.0));
+		final long allowed = Math.min(pctDelta, ABSOLUTE_CAP_GP);
 		final long min = theirValue - allowed;
 		final long max = theirValue + allowed;
 
 		if (ourValue < min || ourValue > max)
 		{
-			return "Trade blocked: your offer (" + formatGp(ourValue) + ") must be within +/-" + limitPct + "% (max +/-" + formatGp(capGp) + ") of their offer (" + formatGp(theirValue) + ").";
+			final String direction = ourValue < min ? "low" : "high";
+			return "Trade blocked: Your offer (" + String.format("%,d", ourValue) + " gp) is too " + direction + ". Try an offer between " + String.format("%,d", min) + " - " + String.format("%,d", max) + " gp.";
 		}
 
 		return null;

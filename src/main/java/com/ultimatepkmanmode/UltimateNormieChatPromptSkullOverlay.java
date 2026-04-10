@@ -13,7 +13,7 @@ import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.util.ImageUtil;
 
-public class UltimatePkerChatPromptSkullOverlay extends Overlay
+public class UltimateNormieChatPromptSkullOverlay extends Overlay
 {
 	private static final int ICON_SIZE = 12;
 
@@ -21,7 +21,7 @@ public class UltimatePkerChatPromptSkullOverlay extends Overlay
 	private final BufferedImage skull;
 
 	@Inject
-	public UltimatePkerChatPromptSkullOverlay(Client client)
+	public UltimateNormieChatPromptSkullOverlay(Client client)
 	{
 		this.client = client;
 		this.skull = createSkullIcon();
