@@ -18,6 +18,7 @@ import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOptionClicked;
+import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
@@ -54,17 +55,34 @@ public class UltimateNormiePlugin extends Plugin
 		{
 			return false;
 		}
-		if (option.equals("bank") || option.startsWith("deposit"))
+		final String t = target == null ? "" : target;
+
+		// Block all "Bank" variants (Bank, Bank-5, Bank-10, Bank-all, Bank-x, etc.)
+		if (option.startsWith("bank"))
 		{
 			return true;
 		}
-		final String t = target == null ? "" : target;
-		final boolean bankLikeTarget = t.contains("bank") || t.contains("banker") || t.contains("deposit");
-		if (!bankLikeTarget)
+
+		// Block deposit boxes specifically
+		if (option.startsWith("deposit") && t.contains("deposit box"))
 		{
-			return false;
+			return true;
 		}
-		return option.contains("use") || option.contains("withdraw") || option.contains("collect");
+
+		// Block "bank-all" / "send to bank" style options on loot interfaces
+		if (option.equals("bank-all") || option.contains("send to bank"))
+		{
+			return true;
+		}
+
+		// Block interactions with bank-like targets (bankers, bank booths, etc.)
+		final boolean bankLikeTarget = t.contains("bank") || t.contains("banker");
+		if (bankLikeTarget)
+		{
+			return option.contains("withdraw") || option.equals("talk-to");
+		}
+
+		return false;
 	}
 
 	public static String formatGp(long gp)
@@ -129,6 +147,17 @@ public class UltimateNormiePlugin extends Plugin
 		overlayManager.remove(tradeBalanceOverlay);
 		overlayManager.remove(chatPromptSkullOverlay);
 		unregisterChatSkullIcon();
+	}
+
+	@Subscribe
+	public void onWidgetLoaded(WidgetLoaded event)
+	{
+		if (DISABLE_BANKING && (event.getGroupId() == 12 || event.getGroupId() == 192))
+		{
+			client.runScript(29);
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Banking is disabled.", null);
+			pendingBoop = true;
+		}
 	}
 
 	@Subscribe
