@@ -80,6 +80,12 @@ public class UltimateNormiePlugin extends Plugin
 			return true;
 		}
 
+		// Block private storage in Chambers of Xeric (allow shared)
+		if (option.equals("private") && t.contains("storage unit"))
+		{
+			return true;
+		}
+
 		// Block interactions with bank-like targets (bankers, bank booths, etc.)
 		final boolean bankLikeTarget = t.contains("bank") || t.contains("banker");
 		if (bankLikeTarget)
