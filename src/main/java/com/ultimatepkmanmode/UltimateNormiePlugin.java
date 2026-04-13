@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.inject.Inject;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.IndexedSprite;
@@ -27,6 +28,7 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.Text;
 
+@Slf4j
 @PluginDescriptor(
 	name = "Ultimate Normie Mode",
 	description = "Restrictions on banking, trading and the GE"
@@ -36,9 +38,12 @@ public class UltimateNormiePlugin extends Plugin
 	private static final boolean DISABLE_BANKING = true;
 	private static final int LIMIT_PCT = 10;
 	private static final long ABSOLUTE_CAP_GP = 5_000_000;
+	private static final int GE_CUSTOM_ENTRY_COOLDOWN = 2;
+	private static final int VARCI_INPUT_TYPE = 5;
 
 	private int gameTick = 0;
 	private int geClickedNonSubmitTick = -1;
+	private int geCustomEntryTick = -100;
 	private int tradeClickedNonAcceptTick = -1;
 	private boolean tradePassedFirstScreen = false;
 	private boolean pendingBoop = false;
@@ -171,6 +176,16 @@ public class UltimateNormiePlugin extends Plugin
 			pendingBoop = false;
 		}
 
+		// While a chatbox input is active on the GE offer screen,
+		// keep the custom-entry cooldown alive so it only starts
+		// counting down after the chatbox is dismissed.
+		if (client.getWidget(465, 24) != null
+			&& gameTick - geCustomEntryTick < 100
+			&& client.getVarcIntValue(VARCI_INPUT_TYPE) != 0)
+		{
+			geCustomEntryTick = gameTick;
+		}
+
 		if (client.getWidget(335, 10) == null && client.getWidget(334, 13) == null)
 		{
 			tradePassedFirstScreen = false;
@@ -206,7 +221,6 @@ public class UltimateNormiePlugin extends Plugin
 		{
 			final boolean isSubmitLike = option.equals("confirm")
 				|| option.equals("submit")
-				|| option.equals("offer")
 				|| option.equals("place")
 				|| option.equals("yes")
 				|| option.equals("continue")
@@ -221,14 +235,29 @@ public class UltimateNormiePlugin extends Plugin
 					return;
 				}
 
+				// Block if a custom price/quantity chatbox was recently opened;
+				// the widget text lags behind the actual entered value.
+				if (gameTick - geCustomEntryTick < GE_CUSTOM_ENTRY_COOLDOWN)
+				{
+					event.consume();
+					return;
+				}
+
 				final String reason = validateGeOffer();
 				if (reason != null)
 				{
 					event.consume();
 					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", reason, null);
 					pendingBoop = true;
+					geClickedNonSubmitTick = gameTick;
 				}
 				return;
+			}
+
+			// Track custom price/quantity entry separately with a longer cooldown
+			if (option.equals("enter price") || option.equals("enter quantity"))
+			{
+				geCustomEntryTick = gameTick;
 			}
 
 			// Any other click while the GE offer screen is open can change the offer.
@@ -320,7 +349,7 @@ public class UltimateNormiePlugin extends Plugin
 		for (Widget w : widgets)
 		{
 			final String t = w.getText();
-			if (t != null && t.contains("coins"))
+			if (t != null && t.contains("coin"))
 			{
 				final Integer parsed = parseFirstInteger(t);
 				if (parsed != null)
@@ -330,7 +359,6 @@ public class UltimateNormiePlugin extends Plugin
 				}
 			}
 		}
-
 		if (price == null)
 		{
 			return null;
