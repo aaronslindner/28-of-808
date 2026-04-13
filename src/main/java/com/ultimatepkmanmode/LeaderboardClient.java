@@ -1,0 +1,105 @@
+package com.ultimatepkmanmode;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.google.gson.reflect.TypeToken;
+import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
+import java.util.function.Consumer;
+import javax.inject.Inject;
+import javax.inject.Singleton;
+import javax.swing.SwingUtilities;
+import lombok.extern.slf4j.Slf4j;
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+
+@Slf4j
+@Singleton
+public class LeaderboardClient
+{
+	private static final MediaType JSON = MediaType.get("application/json");
+
+	private final OkHttpClient httpClient;
+	private final Gson gson;
+
+	@Inject
+	public LeaderboardClient(OkHttpClient httpClient, Gson gson)
+	{
+		this.httpClient = httpClient;
+		this.gson = gson;
+	}
+
+	public void postWealth(String baseUrl, String apiKey, String playerName, long wealth)
+	{
+		final JsonObject body = new JsonObject();
+		body.addProperty("player_name", playerName);
+		body.addProperty("wealth", wealth);
+
+		final Request request = new Request.Builder()
+			.url(baseUrl + "/wealth")
+			.header("X-Api-Key", apiKey)
+			.post(RequestBody.create(JSON, gson.toJson(body)))
+			.build();
+
+		httpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("Leaderboard POST failed: {}", e.getMessage());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				response.close();
+			}
+		});
+	}
+
+	public void fetchLeaderboard(String baseUrl, Consumer<List<LeaderboardEntry>> callback)
+	{
+		final Request request = new Request.Builder()
+			.url(baseUrl + "/leaderboard")
+			.build();
+
+		httpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("Leaderboard GET failed: {}", e.getMessage());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				try
+				{
+					if (!response.isSuccessful() || response.body() == null)
+					{
+						return;
+					}
+					final String json = response.body().string();
+					final List<LeaderboardEntry> entries = gson.fromJson(
+						json,
+						new TypeToken<List<LeaderboardEntry>>(){}.getType()
+					);
+					SwingUtilities.invokeLater(() -> callback.accept(
+						entries != null ? entries : Collections.emptyList()
+					));
+				}
+				finally
+				{
+					response.close();
+				}
+			}
+		});
+	}
+}

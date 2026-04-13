@@ -8,10 +8,13 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.awt.image.BufferedImage;
 import javax.inject.Inject;
+import com.google.inject.Provides;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
 import net.runelite.api.IndexedSprite;
 import net.runelite.api.SoundEffectVolume;
 import net.runelite.api.ItemComposition;
@@ -21,10 +24,13 @@ import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.ui.ClientToolbar;
+import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.Text;
 
@@ -40,6 +46,8 @@ public class UltimateNormiePlugin extends Plugin
 	private static final long ABSOLUTE_CAP_GP = 5_000_000;
 	private static final int GE_CUSTOM_ENTRY_COOLDOWN = 2;
 	private static final int VARCI_INPUT_TYPE = 5;
+	private static final int LEADERBOARD_POST_INTERVAL = 100;
+	private static final int LEADERBOARD_FETCH_INTERVAL = 50;
 
 	private int gameTick = 0;
 	private int geClickedNonSubmitTick = -1;
@@ -141,8 +149,29 @@ public class UltimateNormiePlugin extends Plugin
 	@Inject
 	private UltimateNormieChatPromptSkullOverlay chatPromptSkullOverlay;
 
+	@Inject
+	private UltimateNormieConfig config;
+
+	@Inject
+	private WealthCalculator wealthCalculator;
+
+	@Inject
+	private LeaderboardClient leaderboardClient;
+
+	@Inject
+	private ClientToolbar clientToolbar;
+
+	private LeaderboardPanel leaderboardPanel;
+	private NavigationButton navButton;
+
 	private IndexedSprite[] priorModIcons;
 	private int skullModIconIndex = -1;
+
+	@Provides
+	UltimateNormieConfig provideConfig(ConfigManager configManager)
+	{
+		return configManager.getConfig(UltimateNormieConfig.class);
+	}
 
 	@Override
 	protected void startUp()
@@ -150,6 +179,15 @@ public class UltimateNormiePlugin extends Plugin
 		overlayManager.add(tradeBalanceOverlay);
 		overlayManager.add(chatPromptSkullOverlay);
 		registerChatSkullIcon();
+
+		leaderboardPanel = new LeaderboardPanel();
+		navButton = NavigationButton.builder()
+			.tooltip("UNM Leaderboard")
+			.icon(createNavIcon())
+			.panel(leaderboardPanel)
+			.priority(10)
+			.build();
+		clientToolbar.addNavigation(navButton);
 	}
 
 	@Override
@@ -158,6 +196,7 @@ public class UltimateNormiePlugin extends Plugin
 		overlayManager.remove(tradeBalanceOverlay);
 		overlayManager.remove(chatPromptSkullOverlay);
 		unregisterChatSkullIcon();
+		clientToolbar.removeNavigation(navButton);
 	}
 
 	@Subscribe
@@ -195,6 +234,32 @@ public class UltimateNormiePlugin extends Plugin
 		if (client.getWidget(335, 10) == null && client.getWidget(334, 13) == null)
 		{
 			tradePassedFirstScreen = false;
+		}
+
+		// Leaderboard: post wealth and fetch board on intervals
+		if (config.leaderboardEnabled()
+			&& client.getGameState() == GameState.LOGGED_IN
+			&& client.getLocalPlayer() != null)
+		{
+			final String baseUrl = config.leaderboardUrl();
+			final String apiKey = config.leaderboardApiKey();
+
+			if (gameTick % LEADERBOARD_POST_INTERVAL == 0
+				&& !apiKey.isEmpty()
+				&& !baseUrl.isEmpty())
+			{
+				final long wealth = wealthCalculator.calculateWealth();
+				final String name = client.getLocalPlayer().getName();
+				leaderboardClient.postWealth(baseUrl, apiKey, name, wealth);
+			}
+
+			if (gameTick % LEADERBOARD_FETCH_INTERVAL == 0
+				&& !baseUrl.isEmpty())
+			{
+				leaderboardClient.fetchLeaderboard(baseUrl, entries ->
+					leaderboardPanel.rebuild(entries)
+				);
+			}
 		}
 	}
 
@@ -675,6 +740,38 @@ public class UltimateNormiePlugin extends Plugin
 		}
 		sprite.setPixels(pixels);
 		return sprite;
+	}
+
+	private static BufferedImage createNavIcon()
+	{
+		final int s = 16;
+		final BufferedImage img = new BufferedImage(s, s, BufferedImage.TYPE_INT_ARGB);
+		final int B = 0xFF000000;
+		final int W = 0xFFFFFFFF;
+		final int[][] skull = {
+			{0,0,0,0,0,B,B,B,B,B,B,0,0,0,0,0},
+			{0,0,0,0,B,W,W,W,W,W,W,B,0,0,0,0},
+			{0,0,0,B,W,W,W,W,W,W,W,W,B,0,0,0},
+			{0,0,B,W,W,W,W,W,W,W,W,W,W,B,0,0},
+			{0,0,B,W,B,B,W,W,W,B,B,W,W,B,0,0},
+			{0,0,B,W,B,B,W,W,W,B,B,W,W,B,0,0},
+			{0,0,B,W,W,W,W,B,W,W,W,W,W,B,0,0},
+			{0,0,B,W,W,W,W,W,W,W,W,W,W,B,0,0},
+			{0,0,0,B,W,W,B,W,B,W,W,B,B,0,0,0},
+			{0,0,0,0,B,W,W,W,W,W,B,0,0,0,0,0},
+			{0,0,0,0,0,B,B,B,B,B,0,0,0,0,0,0},
+		};
+		for (int y = 0; y < skull.length; y++)
+		{
+			for (int x = 0; x < skull[y].length; x++)
+			{
+				if (skull[y][x] != 0)
+				{
+					img.setRGB(x, y + 2, skull[y][x]);
+				}
+			}
+		}
+		return img;
 	}
 
 	private static void fill(int[] argb, int w, int x, int y, int rw, int rh, int color)
