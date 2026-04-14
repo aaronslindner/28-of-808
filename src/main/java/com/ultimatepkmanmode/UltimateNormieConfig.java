@@ -18,26 +18,4 @@ public interface UltimateNormieConfig extends Config
 		return false;
 	}
 
-	@ConfigItem(
-		keyName = "leaderboardApiKey",
-		name = "Leaderboard API Key",
-		description = "API key for the UNM leaderboard server",
-		secret = true,
-		position = 2
-	)
-	default String leaderboardApiKey()
-	{
-		return "";
-	}
-
-	@ConfigItem(
-		keyName = "leaderboardUrl",
-		name = "Leaderboard URL",
-		description = "Base URL of the UNM leaderboard server",
-		position = 3
-	)
-	default String leaderboardUrl()
-	{
-		return "https://28-of-808-production.up.railway.app";
-	}
 }

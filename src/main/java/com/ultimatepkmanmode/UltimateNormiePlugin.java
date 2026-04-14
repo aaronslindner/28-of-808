@@ -48,6 +48,8 @@ public class UltimateNormiePlugin extends Plugin
 	private static final int VARCI_INPUT_TYPE = 5;
 	private static final int LEADERBOARD_POST_INTERVAL = 100;
 	private static final int LEADERBOARD_FETCH_INTERVAL = 50;
+	private static final String LEADERBOARD_URL = "https://28-of-808-production.up.railway.app";
+	private static final String LEADERBOARD_API_KEY = "Texhad99bottlesonthewall!";
 
 	private int gameTick = 0;
 	private int geClickedNonSubmitTick = -1;
@@ -241,22 +243,16 @@ public class UltimateNormiePlugin extends Plugin
 			&& client.getGameState() == GameState.LOGGED_IN
 			&& client.getLocalPlayer() != null)
 		{
-			final String baseUrl = config.leaderboardUrl();
-			final String apiKey = config.leaderboardApiKey();
-
-			if (gameTick % LEADERBOARD_POST_INTERVAL == 0
-				&& !apiKey.isEmpty()
-				&& !baseUrl.isEmpty())
+			if (gameTick % LEADERBOARD_POST_INTERVAL == 0)
 			{
 				final long wealth = wealthCalculator.calculateWealth();
 				final String name = client.getLocalPlayer().getName();
-				leaderboardClient.postWealth(baseUrl, apiKey, name, wealth);
+				leaderboardClient.postWealth(LEADERBOARD_URL, LEADERBOARD_API_KEY, name, wealth);
 			}
 
-			if (gameTick % LEADERBOARD_FETCH_INTERVAL == 0
-				&& !baseUrl.isEmpty())
+			if (gameTick % LEADERBOARD_FETCH_INTERVAL == 0)
 			{
-				leaderboardClient.fetchLeaderboard(baseUrl, entries ->
+				leaderboardClient.fetchLeaderboard(LEADERBOARD_URL, entries ->
 					leaderboardPanel.rebuild(entries)
 				);
 			}
