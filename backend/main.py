@@ -77,6 +77,15 @@ async def get_leaderboard():
     ]
 
 
+@app.delete("/leaderboard")
+async def clear_leaderboard(x_api_key: str = Header()):
+    if x_api_key != API_KEY:
+        raise HTTPException(401, "Invalid API key")
+    async with pool.acquire() as con:
+        await con.execute("DELETE FROM leaderboard")
+    return {"ok": True}
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
