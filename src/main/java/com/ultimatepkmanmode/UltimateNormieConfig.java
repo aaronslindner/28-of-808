@@ -38,6 +38,6 @@ public interface UltimateNormieConfig extends Config
 	)
 	default String leaderboardUrl()
 	{
-		return "https://your-app.up.railway.app";
+		return "https://28-of-808-production.up.railway.app";
 	}
 }
