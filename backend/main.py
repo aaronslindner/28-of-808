@@ -1,7 +1,8 @@
 import os
 from datetime import datetime, timedelta
 
-from fastapi import FastAPI, HTTPException, Header
+from typing import Optional
+from fastapi import FastAPI, HTTPException, Header, Query
 from pydantic import BaseModel
 import asyncpg
 
@@ -59,7 +60,7 @@ async def update_wealth(data: WealthUpdate, x_api_key: str = Header()):
 
 
 @app.get("/leaderboard")
-async def get_leaderboard():
+async def get_leaderboard(player: Optional[str] = Query(None)):
     async with pool.acquire() as con:
         rows = await con.fetch("""
             SELECT player_name, wealth, updated_at
@@ -67,14 +68,35 @@ async def get_leaderboard():
             ORDER BY wealth DESC
             LIMIT 100
         """)
-    return [
-        {
-            "player_name": r["player_name"],
-            "wealth": r["wealth"],
-            "updated_at": r["updated_at"].isoformat(),
-        }
-        for r in rows
-    ]
+
+        player_rank = None
+        if player:
+            rank_row = await con.fetchrow("""
+                SELECT rank, player_name, wealth FROM (
+                    SELECT player_name, wealth,
+                           RANK() OVER (ORDER BY wealth DESC) as rank
+                    FROM leaderboard
+                ) sub
+                WHERE player_name = $1
+            """, player)
+            if rank_row:
+                player_rank = {
+                    "rank": rank_row["rank"],
+                    "player_name": rank_row["player_name"],
+                    "wealth": rank_row["wealth"],
+                }
+
+    return {
+        "player_rank": player_rank,
+        "leaderboard": [
+            {
+                "player_name": r["player_name"],
+                "wealth": r["wealth"],
+                "updated_at": r["updated_at"].isoformat(),
+            }
+            for r in rows
+        ],
+    }
 
 
 @app.delete("/leaderboard")

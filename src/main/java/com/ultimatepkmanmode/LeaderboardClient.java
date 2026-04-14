@@ -2,10 +2,8 @@ package com.ultimatepkmanmode;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
-import com.google.gson.reflect.TypeToken;
 import java.io.IOException;
 import java.util.Collections;
-import java.util.List;
 import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -63,10 +61,16 @@ public class LeaderboardClient
 		});
 	}
 
-	public void fetchLeaderboard(String baseUrl, Consumer<List<LeaderboardEntry>> callback)
+	public void fetchLeaderboard(String baseUrl, String playerName, Consumer<LeaderboardResponse> callback)
 	{
+		String url = baseUrl + "/leaderboard";
+		if (playerName != null && !playerName.isEmpty())
+		{
+			url += "?player=" + playerName;
+		}
+
 		final Request request = new Request.Builder()
-			.url(baseUrl + "/leaderboard")
+			.url(url)
 			.build();
 
 		httpClient.newCall(request).enqueue(new Callback()
@@ -87,13 +91,15 @@ public class LeaderboardClient
 						return;
 					}
 					final String json = response.body().string();
-					final List<LeaderboardEntry> entries = gson.fromJson(
-						json,
-						new TypeToken<List<LeaderboardEntry>>(){}.getType()
-					);
-					SwingUtilities.invokeLater(() -> callback.accept(
-						entries != null ? entries : Collections.emptyList()
-					));
+					final LeaderboardResponse data = gson.fromJson(json, LeaderboardResponse.class);
+					if (data != null)
+					{
+						if (data.getLeaderboard() == null)
+						{
+							data.setLeaderboard(Collections.emptyList());
+						}
+						SwingUtilities.invokeLater(() -> callback.accept(data));
+					}
 				}
 				finally
 				{

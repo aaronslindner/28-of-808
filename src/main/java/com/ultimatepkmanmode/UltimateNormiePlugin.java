@@ -185,8 +185,8 @@ public class UltimateNormiePlugin extends Plugin
 
 		leaderboardPanel = new LeaderboardPanel();
 		leaderboardPanel.setRefreshAction(() ->
-			leaderboardClient.fetchLeaderboard(LEADERBOARD_URL, entries ->
-				leaderboardPanel.rebuild(entries)
+			leaderboardClient.fetchLeaderboard(LEADERBOARD_URL, lastPlayerName, response ->
+				leaderboardPanel.rebuild(response)
 			)
 		);
 		navButton = NavigationButton.builder()
@@ -251,13 +251,15 @@ public class UltimateNormiePlugin extends Plugin
 		{
 			lastWealth = wealthCalculator.calculateWealth();
 			lastPlayerName = client.getLocalPlayer().getName();
+			leaderboardPanel.setPlayerName(lastPlayerName);
 		}
 	}
 
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
-		if (event.getGameState() == GameState.LOGIN_SCREEN
+		if ((event.getGameState() == GameState.LOGIN_SCREEN
+			|| event.getGameState() == GameState.HOPPING)
 			&& config.leaderboardEnabled()
 			&& lastPlayerName != null)
 		{

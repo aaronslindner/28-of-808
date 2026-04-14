@@ -20,6 +20,7 @@ public class LeaderboardPanel extends PluginPanel
 {
 	private final JPanel listPanel = new JPanel();
 	private Runnable refreshAction;
+	private String playerName;
 
 	public LeaderboardPanel()
 	{
@@ -57,7 +58,7 @@ public class LeaderboardPanel extends PluginPanel
 		scrollPane.setBorder(BorderFactory.createEmptyBorder());
 		add(scrollPane, BorderLayout.CENTER);
 
-		rebuild(Collections.emptyList());
+		rebuild(null);
 	}
 
 	public void setRefreshAction(Runnable action)
@@ -65,9 +66,37 @@ public class LeaderboardPanel extends PluginPanel
 		this.refreshAction = action;
 	}
 
-	public void rebuild(List<LeaderboardEntry> entries)
+	public void setPlayerName(String name)
+	{
+		this.playerName = name;
+	}
+
+	public void rebuild(LeaderboardResponse response)
 	{
 		listPanel.removeAll();
+
+		// Player's own rank
+		final String displayName = playerName != null ? playerName : "You";
+		if (response != null && response.getPlayerRank() != null)
+		{
+			LeaderboardResponse.PlayerRank pr = response.getPlayerRank();
+			listPanel.add(createPlayerRankRow(pr.getRank(), pr.getPlayerName(), pr.getWealth()));
+		}
+		else
+		{
+			listPanel.add(createPlayerRankRow(-1, displayName, -1));
+		}
+
+		// Separator
+		final JPanel sep = new JPanel();
+		sep.setBackground(ColorScheme.MEDIUM_GRAY_COLOR);
+		sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 2));
+		sep.setPreferredSize(new Dimension(0, 2));
+		listPanel.add(sep);
+
+		final List<LeaderboardEntry> entries = response != null && response.getLeaderboard() != null
+			? response.getLeaderboard()
+			: Collections.emptyList();
 
 		if (entries.isEmpty())
 		{
@@ -88,6 +117,36 @@ public class LeaderboardPanel extends PluginPanel
 
 		listPanel.revalidate();
 		listPanel.repaint();
+	}
+
+	private JPanel createPlayerRankRow(int rank, String name, long wealth)
+	{
+		final JPanel row = new JPanel(new BorderLayout());
+		row.setBackground(new Color(40, 40, 60));
+		row.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+
+		final String rankText = rank > 0 ? "#" + rank : "???";
+		final JLabel nameLabel = new JLabel(rankText + "  " + name);
+		nameLabel.setForeground(new Color(100, 200, 255));
+		nameLabel.setFont(nameLabel.getFont().deriveFont(Font.BOLD));
+		row.add(nameLabel, BorderLayout.WEST);
+
+		if (wealth >= 0)
+		{
+			final JLabel wealthLabel = new JLabel(UltimateNormiePlugin.formatGp(wealth));
+			wealthLabel.setForeground(new Color(255, 215, 0));
+			wealthLabel.setFont(wealthLabel.getFont().deriveFont(Font.BOLD));
+			row.add(wealthLabel, BorderLayout.EAST);
+		}
+		else
+		{
+			final JLabel unknown = new JLabel("---");
+			unknown.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			row.add(unknown, BorderLayout.EAST);
+		}
+
+		return row;
 	}
 
 	private JPanel createRow(int rank, LeaderboardEntry entry)
