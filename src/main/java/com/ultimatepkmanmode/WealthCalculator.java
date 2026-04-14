@@ -20,13 +20,25 @@ public class WealthCalculator
 	@Inject
 	private ItemManager itemManager;
 
+	private long cachedLootingBagWealth = 0;
+
 	public long calculateWealth()
 	{
 		long total = 0;
 		total += containerWealth(InventoryID.INV);
 		total += containerWealth(InventoryID.WORN);
-		total += containerWealth(InventoryID.LOOTING_BAG);
+		total += cachedLootingBagWealth;
 		return total;
+	}
+
+	public void updateLootingBagCache()
+	{
+		cachedLootingBagWealth = containerWealth(InventoryID.LOOTING_BAG);
+	}
+
+	public void clearLootingBagCache()
+	{
+		cachedLootingBagWealth = 0;
 	}
 
 	private long containerWealth(int id)
@@ -56,7 +68,15 @@ public class WealthCalculator
 			}
 			else
 			{
-				price = itemManager.getItemPrice(itemId);
+				int gePrice = itemManager.getItemPrice(itemId);
+				if (gePrice > 0)
+				{
+					price = gePrice;
+				}
+				else
+				{
+					price = client.getItemDefinition(itemId).getPrice();
+				}
 			}
 			total += (long) price * qty;
 		}

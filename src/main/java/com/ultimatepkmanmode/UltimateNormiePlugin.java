@@ -1,6 +1,5 @@
 package com.ultimatepkmanmode;
 
-import java.math.RoundingMode;
 import java.text.DecimalFormat;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -18,6 +17,7 @@ import net.runelite.api.GameState;
 import net.runelite.api.IndexedSprite;
 import net.runelite.api.SoundEffectVolume;
 import net.runelite.api.ItemComposition;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
@@ -110,26 +110,40 @@ public class UltimateNormiePlugin extends Plugin
 	public static String formatGp(long gp)
 	{
 		final long abs = Math.abs(gp);
-		final DecimalFormat df = new DecimalFormat("0.#");
-		df.setRoundingMode(RoundingMode.HALF_UP);
 		final String s;
 		if (abs >= 1_000_000_000L)
 		{
-			s = df.format(abs / 1_000_000_000.0) + "B";
+			s = sigFigs(abs / 1_000_000_000.0) + "B";
 		}
 		else if (abs >= 1_000_000L)
 		{
-			s = df.format(abs / 1_000_000.0) + "M";
+			s = sigFigs(abs / 1_000_000.0) + "M";
 		}
 		else if (abs >= 1_000L)
 		{
-			s = df.format(abs / 1_000.0) + "K";
+			s = sigFigs(abs / 1_000.0) + "K";
 		}
 		else
 		{
 			s = Long.toString(abs);
 		}
 		return (gp < 0 ? "-" : "") + s + " gp";
+	}
+
+	private static String sigFigs(double value)
+	{
+		if (value >= 100)
+		{
+			return Long.toString(Math.round(value));
+		}
+		else if (value >= 10)
+		{
+			return new DecimalFormat("0.#", java.text.DecimalFormatSymbols.getInstance()).format(value);
+		}
+		else
+		{
+			return new DecimalFormat("0.##", java.text.DecimalFormatSymbols.getInstance()).format(value);
+		}
 	}
 
 	public long getAbsoluteCapGp()
@@ -271,6 +285,11 @@ public class UltimateNormiePlugin extends Plugin
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
+		if (event.getContainerId() == InventoryID.LOOTING_BAG)
+		{
+			wealthCalculator.updateLootingBagCache();
+		}
+
 		if (client.getWidget(335, 10) != null)
 		{
 			tradePassedFirstScreen = false;
@@ -283,6 +302,11 @@ public class UltimateNormiePlugin extends Plugin
 	{
 		final String option = Text.standardize(event.getMenuOption());
 		final String target = Text.standardize(event.getMenuTarget());
+
+		if (option.equals("destroy") && target.contains("looting bag"))
+		{
+			wealthCalculator.clearLootingBagCache();
+		}
 
 		if (DISABLE_BANKING && isBankInteraction(option, target))
 		{
