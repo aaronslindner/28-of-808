@@ -90,6 +90,7 @@ public class LeaderboardClient
 					{
 						return;
 					}
+					//noinspection ConstantConditions
 					final String json = response.body().string();
 					final LeaderboardResponse data = gson.fromJson(json, LeaderboardResponse.class);
 					if (data != null)
