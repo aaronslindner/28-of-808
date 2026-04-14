@@ -6,6 +6,7 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.IntConsumer;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
@@ -18,9 +19,15 @@ import net.runelite.client.ui.PluginPanel;
 
 public class LeaderboardPanel extends PluginPanel
 {
+	private static final int PAGE_SIZE = 20;
 	private final JPanel listPanel = new JPanel();
-	private Runnable refreshAction;
+	private final JPanel footerPanel = new JPanel(new BorderLayout());
+	private final JButton prevBtn = new JButton("< Prev");
+	private final JButton nextBtn = new JButton("Next >");
+	private IntConsumer pageCallback;
 	private String playerName;
+	private int currentPage = 1;
+	private int totalPages = 1;
 
 	public LeaderboardPanel()
 	{
@@ -39,13 +46,7 @@ public class LeaderboardPanel extends PluginPanel
 		header.add(title, BorderLayout.CENTER);
 
 		final JButton refreshBtn = new JButton("Refresh");
-		refreshBtn.addActionListener(e ->
-		{
-			if (refreshAction != null)
-			{
-				refreshAction.run();
-			}
-		});
+		refreshBtn.addActionListener(e -> requestPage(currentPage));
 		header.add(refreshBtn, BorderLayout.SOUTH);
 
 		add(header, BorderLayout.NORTH);
@@ -58,12 +59,30 @@ public class LeaderboardPanel extends PluginPanel
 		scrollPane.setBorder(BorderFactory.createEmptyBorder());
 		add(scrollPane, BorderLayout.CENTER);
 
+		// Footer with pagination
+		footerPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		footerPanel.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
+		prevBtn.addActionListener(e -> requestPage(currentPage - 1));
+		nextBtn.addActionListener(e -> requestPage(currentPage + 1));
+		footerPanel.add(prevBtn, BorderLayout.WEST);
+		footerPanel.add(nextBtn, BorderLayout.EAST);
+		add(footerPanel, BorderLayout.SOUTH);
+
 		rebuild(null);
 	}
 
-	public void setRefreshAction(Runnable action)
+	public void setPageCallback(IntConsumer callback)
 	{
-		this.refreshAction = action;
+		this.pageCallback = callback;
+	}
+
+	private void requestPage(int page)
+	{
+		if (page < 1 || page > totalPages || pageCallback == null)
+		{
+			return;
+		}
+		pageCallback.accept(page);
 	}
 
 	public void setPlayerName(String name)
@@ -73,6 +92,12 @@ public class LeaderboardPanel extends PluginPanel
 
 	public void rebuild(LeaderboardResponse response)
 	{
+		if (response != null)
+		{
+			currentPage = response.getPage();
+			totalPages = response.getTotalPages();
+		}
+
 		listPanel.removeAll();
 
 		// Player's own rank
@@ -108,12 +133,16 @@ public class LeaderboardPanel extends PluginPanel
 		}
 		else
 		{
-			int rank = 1;
+			int startRank = (currentPage - 1) * PAGE_SIZE + 1;
 			for (LeaderboardEntry entry : entries)
 			{
-				listPanel.add(createRow(rank++, entry));
+				listPanel.add(createRow(startRank++, entry));
 			}
 		}
+
+		// Update footer
+		prevBtn.setEnabled(currentPage > 1);
+		nextBtn.setEnabled(currentPage < totalPages);
 
 		listPanel.revalidate();
 		listPanel.repaint();

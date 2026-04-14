@@ -10,6 +10,11 @@ public class LeaderboardResponse
 	@SerializedName("player_rank")
 	private PlayerRank playerRank;
 
+	private int page;
+
+	@SerializedName("total_pages")
+	private int totalPages;
+
 	private List<LeaderboardEntry> leaderboard;
 
 	@Data

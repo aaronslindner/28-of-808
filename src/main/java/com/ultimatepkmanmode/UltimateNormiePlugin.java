@@ -184,8 +184,8 @@ public class UltimateNormiePlugin extends Plugin
 		registerChatSkullIcon();
 
 		leaderboardPanel = new LeaderboardPanel();
-		leaderboardPanel.setRefreshAction(() ->
-			leaderboardClient.fetchLeaderboard(LEADERBOARD_URL, lastPlayerName, response ->
+		leaderboardPanel.setPageCallback(page ->
+			leaderboardClient.fetchLeaderboard(LEADERBOARD_URL, lastPlayerName, page, response ->
 				leaderboardPanel.rebuild(response)
 			)
 		);

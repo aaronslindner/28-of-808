@@ -61,12 +61,12 @@ public class LeaderboardClient
 		});
 	}
 
-	public void fetchLeaderboard(String baseUrl, String playerName, Consumer<LeaderboardResponse> callback)
+	public void fetchLeaderboard(String baseUrl, String playerName, int page, Consumer<LeaderboardResponse> callback)
 	{
-		String url = baseUrl + "/leaderboard";
+		String url = baseUrl + "/leaderboard?page=" + page;
 		if (playerName != null && !playerName.isEmpty())
 		{
-			url += "?player=" + playerName;
+			url += "&player=" + playerName;
 		}
 
 		final Request request = new Request.Builder()

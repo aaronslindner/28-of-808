@@ -60,14 +60,20 @@ async def update_wealth(data: WealthUpdate, x_api_key: str = Header()):
 
 
 @app.get("/leaderboard")
-async def get_leaderboard(player: Optional[str] = Query(None)):
+async def get_leaderboard(
+    player: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    offset = (page - 1) * page_size
     async with pool.acquire() as con:
+        total = await con.fetchval("SELECT COUNT(*) FROM leaderboard")
         rows = await con.fetch("""
             SELECT player_name, wealth, updated_at
             FROM leaderboard
             ORDER BY wealth DESC
-            LIMIT 100
-        """)
+            LIMIT $1 OFFSET $2
+        """, page_size, offset)
 
         player_rank = None
         if player:
@@ -88,6 +94,8 @@ async def get_leaderboard(player: Optional[str] = Query(None)):
 
     return {
         "player_rank": player_rank,
+        "page": page,
+        "total_pages": max(1, (total + page_size - 1) // page_size),
         "leaderboard": [
             {
                 "player_name": r["player_name"],
