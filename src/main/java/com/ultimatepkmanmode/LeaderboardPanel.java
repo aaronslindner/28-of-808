@@ -8,6 +8,7 @@ import java.util.Collections;
 import java.util.List;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
+import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -18,6 +19,7 @@ import net.runelite.client.ui.PluginPanel;
 public class LeaderboardPanel extends PluginPanel
 {
 	private final JPanel listPanel = new JPanel();
+	private Runnable refreshAction;
 
 	public LeaderboardPanel()
 	{
@@ -25,12 +27,27 @@ public class LeaderboardPanel extends PluginPanel
 		setLayout(new BorderLayout());
 		setBackground(ColorScheme.DARK_GRAY_COLOR);
 
+		final JPanel header = new JPanel(new BorderLayout());
+		header.setBackground(ColorScheme.DARK_GRAY_COLOR);
+
 		final JLabel title = new JLabel("UNM Leaderboard");
 		title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
 		title.setForeground(Color.WHITE);
 		title.setHorizontalAlignment(SwingConstants.CENTER);
 		title.setBorder(BorderFactory.createEmptyBorder(8, 0, 8, 0));
-		add(title, BorderLayout.NORTH);
+		header.add(title, BorderLayout.CENTER);
+
+		final JButton refreshBtn = new JButton("Refresh");
+		refreshBtn.addActionListener(e ->
+		{
+			if (refreshAction != null)
+			{
+				refreshAction.run();
+			}
+		});
+		header.add(refreshBtn, BorderLayout.SOUTH);
+
+		add(header, BorderLayout.NORTH);
 
 		listPanel.setLayout(new BoxLayout(listPanel, BoxLayout.Y_AXIS));
 		listPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -41,6 +58,11 @@ public class LeaderboardPanel extends PluginPanel
 		add(scrollPane, BorderLayout.CENTER);
 
 		rebuild(Collections.emptyList());
+	}
+
+	public void setRefreshAction(Runnable action)
+	{
+		this.refreshAction = action;
 	}
 
 	public void rebuild(List<LeaderboardEntry> entries)

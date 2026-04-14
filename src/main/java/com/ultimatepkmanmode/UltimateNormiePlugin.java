@@ -19,6 +19,7 @@ import net.runelite.api.IndexedSprite;
 import net.runelite.api.SoundEffectVolume;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.MenuOptionClicked;
@@ -46,8 +47,6 @@ public class UltimateNormiePlugin extends Plugin
 	private static final long ABSOLUTE_CAP_GP = 5_000_000;
 	private static final int GE_CUSTOM_ENTRY_COOLDOWN = 2;
 	private static final int VARCI_INPUT_TYPE = 5;
-	private static final int LEADERBOARD_POST_INTERVAL = 100;
-	private static final int LEADERBOARD_FETCH_INTERVAL = 50;
 	private static final String LEADERBOARD_URL = "https://28-of-808-production.up.railway.app";
 	private static final String LEADERBOARD_API_KEY = "Texhad99bottlesonthewall!";
 
@@ -58,6 +57,8 @@ public class UltimateNormiePlugin extends Plugin
 	private boolean tradePassedFirstScreen = false;
 	private boolean pendingBoop = false;
 	private int tradeItemChangedTick = -1;
+	private long lastWealth = 0;
+	private String lastPlayerName = null;
 
 	public int getLimitPct()
 	{
@@ -183,6 +184,11 @@ public class UltimateNormiePlugin extends Plugin
 		registerChatSkullIcon();
 
 		leaderboardPanel = new LeaderboardPanel();
+		leaderboardPanel.setRefreshAction(() ->
+			leaderboardClient.fetchLeaderboard(LEADERBOARD_URL, entries ->
+				leaderboardPanel.rebuild(entries)
+			)
+		);
 		navButton = NavigationButton.builder()
 			.tooltip("UNM Leaderboard")
 			.icon(createNavIcon())
@@ -238,24 +244,25 @@ public class UltimateNormiePlugin extends Plugin
 			tradePassedFirstScreen = false;
 		}
 
-		// Leaderboard: post wealth and fetch board on intervals
+		// Leaderboard: snapshot wealth while logged in for posting on logout
 		if (config.leaderboardEnabled()
 			&& client.getGameState() == GameState.LOGGED_IN
 			&& client.getLocalPlayer() != null)
 		{
-			if (gameTick % LEADERBOARD_POST_INTERVAL == 0)
-			{
-				final long wealth = wealthCalculator.calculateWealth();
-				final String name = client.getLocalPlayer().getName();
-				leaderboardClient.postWealth(LEADERBOARD_URL, LEADERBOARD_API_KEY, name, wealth);
-			}
+			lastWealth = wealthCalculator.calculateWealth();
+			lastPlayerName = client.getLocalPlayer().getName();
+		}
+	}
 
-			if (gameTick % LEADERBOARD_FETCH_INTERVAL == 0)
-			{
-				leaderboardClient.fetchLeaderboard(LEADERBOARD_URL, entries ->
-					leaderboardPanel.rebuild(entries)
-				);
-			}
+	@Subscribe
+	public void onGameStateChanged(GameStateChanged event)
+	{
+		if (event.getGameState() == GameState.LOGIN_SCREEN
+			&& config.leaderboardEnabled()
+			&& lastPlayerName != null)
+		{
+			leaderboardClient.postWealth(LEADERBOARD_URL, LEADERBOARD_API_KEY, lastPlayerName, lastWealth);
+			lastPlayerName = null;
 		}
 	}
 
