@@ -86,12 +86,12 @@ public class LeaderboardClient
 			{
 				try
 				{
-					if (!response.isSuccessful() || response.body() == null)
+					final okhttp3.ResponseBody body = response.body();
+					if (!response.isSuccessful() || body == null)
 					{
 						return;
 					}
-					//noinspection ConstantConditions
-					final String json = response.body().string();
+					final String json = body.string();
 					final LeaderboardResponse data = gson.fromJson(json, LeaderboardResponse.class);
 					if (data != null)
 					{
