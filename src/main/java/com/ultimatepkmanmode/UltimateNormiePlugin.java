@@ -53,7 +53,7 @@ public class UltimateNormiePlugin extends Plugin
 	private static final int VARCI_INPUT_TYPE = 5;
 	private static final String LEADERBOARD_URL = "https://28-of-808-production.up.railway.app";
 	private static final String LEADERBOARD_API_KEY = "Texhad99bottlesonthewall!";
-	private static final long PRESTIGE_COST = 1_000L; // TODO: restore to 1_000_000_000L after testing
+	private static final long PRESTIGE_COST = 1_000_000_000L;
 	private static final int COINS = 995;
 	private static final int PLATINUM_TOKEN = 13204;
 
