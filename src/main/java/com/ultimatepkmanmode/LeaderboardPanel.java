@@ -4,12 +4,14 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.image.BufferedImage;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.IntConsumer;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -149,7 +151,17 @@ public class LeaderboardPanel extends PluginPanel
 		else
 		{
 			prestigeBtn.setEnabled(true);
-			prestigeBtn.setText("Prestige (1B GP)");
+			if (incinerated > 0)
+			{
+				prestigeBtn.setText("Resume Prestige");
+				prestigeProgress.setVisible(true);
+				prestigeProgress.setText("Saved: " + UltimateNormiePlugin.formatGp(incinerated)
+					+ " / " + UltimateNormiePlugin.formatGp(target));
+			}
+			else
+			{
+				prestigeBtn.setText("Prestige (1B GP)");
+			}
 		}
 		revalidate();
 		repaint();
@@ -232,13 +244,111 @@ public class LeaderboardPanel extends PluginPanel
 		listPanel.repaint();
 	}
 
-	private static String prestigeSkull(int prestige)
+	private static ImageIcon prestigeSkullIcon(int prestige)
 	{
 		if (prestige <= 0)
 		{
-			return "";
+			return null;
 		}
-		return " \u2620";
+		final boolean horned = prestige >= 9;
+		final boolean gilded = prestige >= 10;
+		final Color skullFill = prestige >= 8 ? Color.BLACK : prestigeColor(prestige);
+		return new ImageIcon(createSkullImage(skullFill, 12, horned, gilded));
+	}
+
+	static BufferedImage createSkullImage(Color fill, int size)
+	{
+		return createSkullImage(fill, size, false, false);
+	}
+
+	static BufferedImage createSkullImage(Color fill, int size, boolean horned, boolean gilded)
+	{
+		final boolean inverted = fill.equals(Color.BLACK);
+		final int w = 12;
+		final int h = 12;
+		final BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+		final int GOLD = 0xFFFFD700;
+		final int RED  = 0xFFFF0000;
+		final int O = gilded ? GOLD : (inverted ? 0xFFFFFFFF : 0xFF000000); // outline
+		final int F = inverted ? 0xFF000000 : fill.getRGB(); // fill
+		final int D = gilded ? GOLD : (inverted ? 0xFFFFFFFF : 0xFF000000); // detail
+		final int E = gilded ? RED : D; // eyes
+
+		if (horned)
+		{
+			// Horns: 1px tip, widening down into skull sides
+			fillRect(img, 0, 0, 1, 1, O);  // left tip
+			fillRect(img, 0, 1, 2, 1, O);  // left widen
+			fillRect(img, 1, 2, 2, 1, O);  // left base
+			fillRect(img, 11, 0, 1, 1, O); // right tip
+			fillRect(img, 10, 1, 2, 1, O); // right widen
+			fillRect(img, 9, 2, 2, 1, O);  // right base
+			// Skull body (horns merge into sides)
+			fillRect(img, 3, 2, 6, 1, O);
+			fillRect(img, 2, 3, 8, 1, O);
+			fillRect(img, 1, 3, 1, 5, O);  // left side column
+			fillRect(img, 10, 3, 1, 5, O); // right side column
+			fillRect(img, 2, 4, 8, 4, O);
+			fillRect(img, 2, 8, 8, 1, O);
+			fillRect(img, 3, 9, 6, 1, O);
+
+			fillRect(img, 3, 3, 6, 1, F);
+			fillRect(img, 2, 4, 8, 4, F);
+			fillRect(img, 3, 8, 6, 1, F);
+
+			fillRect(img, 3, 5, 2, 2, E);
+			fillRect(img, 7, 5, 2, 2, E);
+			fillRect(img, 5, 7, 2, 1, D);
+
+			fillRect(img, 4, 9, 1, 1, D);
+			fillRect(img, 6, 9, 1, 1, D);
+		}
+		else
+		{
+			// outline
+			fillRect(img, 3, 1, 6, 1, O);
+			fillRect(img, 2, 2, 8, 1, O);
+			fillRect(img, 1, 3, 10, 5, O);
+			fillRect(img, 2, 8, 8, 1, O);
+			fillRect(img, 3, 9, 6, 1, O);
+
+			// fill
+			fillRect(img, 3, 2, 6, 1, F);
+			fillRect(img, 2, 3, 8, 5, F);
+			fillRect(img, 3, 8, 6, 1, F);
+
+			// eyes + nose
+			fillRect(img, 3, 4, 2, 2, D);
+			fillRect(img, 7, 4, 2, 2, D);
+			fillRect(img, 5, 6, 2, 1, D);
+
+			// teeth
+			fillRect(img, 4, 9, 1, 1, D);
+			fillRect(img, 6, 9, 1, 1, D);
+		}
+
+		if (size != w)
+		{
+			final BufferedImage scaled = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+			final java.awt.Graphics2D g = scaled.createGraphics();
+			g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,
+				java.awt.RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+			g.drawImage(img, 0, 0, size, size, null);
+			g.dispose();
+			return scaled;
+		}
+		return img;
+	}
+
+	private static void fillRect(BufferedImage img, int x, int y, int w, int h, int argb)
+	{
+		for (int dy = 0; dy < h; dy++)
+		{
+			for (int dx = 0; dx < w; dx++)
+			{
+				img.setRGB(x + dx, y + dy, argb);
+			}
+		}
 	}
 
 	private static Color prestigeColor(int prestige)
@@ -249,10 +359,12 @@ public class LeaderboardPanel extends PluginPanel
 			case 2: return new Color(255, 127, 0);     // Orange
 			case 3: return new Color(255, 255, 0);     // Yellow
 			case 4: return new Color(0, 255, 0);       // Green
-			case 5: return new Color(0, 0, 255);       // Blue
+			case 5: return new Color(0, 100, 255);     // Blue
 			case 6: return new Color(75, 0, 130);      // Indigo
 			case 7: return new Color(139, 0, 255);     // Violet
-			default: return prestige > 7 ? new Color(17, 17, 17) : Color.WHITE;
+			case 8: return Color.BLACK;
+			case 9: return Color.BLACK;
+			default: return prestige >= 10 ? new Color(255, 215, 0) : Color.WHITE; // Gold
 		}
 	}
 
@@ -264,10 +376,24 @@ public class LeaderboardPanel extends PluginPanel
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
 
 		final String rankText = rank > 0 ? "#" + rank : "???";
-		final JLabel nameLabel = new JLabel(rankText + "  " + name + prestigeSkull(prestige));
+		final JLabel nameLabel = new JLabel(rankText + "  " + name);
 		nameLabel.setForeground(prestige > 0 ? prestigeColor(prestige) : Color.WHITE);
 		nameLabel.setFont(nameLabel.getFont().deriveFont(Font.BOLD));
-		row.add(nameLabel, BorderLayout.WEST);
+		final ImageIcon skullIcon = prestigeSkullIcon(prestige);
+		if (skullIcon != null)
+		{
+			final JLabel skullLabel = new JLabel(skullIcon);
+			skullLabel.setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 0));
+			final JPanel namePanel = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+			namePanel.setOpaque(false);
+			namePanel.add(nameLabel);
+			namePanel.add(skullLabel);
+			row.add(namePanel, BorderLayout.WEST);
+		}
+		else
+		{
+			row.add(nameLabel, BorderLayout.WEST);
+		}
 
 		if (wealth >= 0)
 		{
@@ -294,9 +420,23 @@ public class LeaderboardPanel extends PluginPanel
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 
 		final int p = entry.getPrestige();
-		final JLabel nameLabel = new JLabel("#" + rank + "  " + entry.getPlayerName() + prestigeSkull(p));
+		final JLabel nameLabel = new JLabel("#" + rank + "  " + entry.getPlayerName());
 		nameLabel.setForeground(p > 0 ? prestigeColor(p) : Color.WHITE);
-		row.add(nameLabel, BorderLayout.WEST);
+		final ImageIcon skullIcon = prestigeSkullIcon(p);
+		if (skullIcon != null)
+		{
+			final JLabel skullLabel = new JLabel(skullIcon);
+			skullLabel.setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 0));
+			final JPanel namePanel = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+			namePanel.setOpaque(false);
+			namePanel.add(nameLabel);
+			namePanel.add(skullLabel);
+			row.add(namePanel, BorderLayout.WEST);
+		}
+		else
+		{
+			row.add(nameLabel, BorderLayout.WEST);
+		}
 
 		final JLabel wealthLabel = new JLabel(UltimateNormiePlugin.formatGp(entry.getWealth()));
 		wealthLabel.setForeground(p > 0 ? prestigeColor(p) : new Color(255, 215, 0));

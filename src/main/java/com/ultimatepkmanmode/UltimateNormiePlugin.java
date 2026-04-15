@@ -53,7 +53,7 @@ public class UltimateNormiePlugin extends Plugin
 	private static final int VARCI_INPUT_TYPE = 5;
 	private static final String LEADERBOARD_URL = "https://28-of-808-production.up.railway.app";
 	private static final String LEADERBOARD_API_KEY = "Texhad99bottlesonthewall!";
-	private static final long PRESTIGE_COST = 10_000L; // TODO: restore to 1_000_000_000L after testing
+	private static final long PRESTIGE_COST = 1_000L; // TODO: restore to 1_000_000_000L after testing
 	private static final int COINS = 995;
 	private static final int PLATINUM_TOKEN = 13204;
 
@@ -68,6 +68,7 @@ public class UltimateNormiePlugin extends Plugin
 	private String lastPlayerName = null;
 
 	private int playerPrestige = 0;
+	private boolean pendingPrestigeFetch = false;
 
 	// Prestige mode state
 	private boolean prestigeMode = false;
@@ -196,6 +197,9 @@ public class UltimateNormiePlugin extends Plugin
 	@Inject
 	private ClientToolbar clientToolbar;
 
+	@Inject
+	private ConfigManager configManager;
+
 	private LeaderboardPanel leaderboardPanel;
 	private NavigationButton navButton;
 
@@ -263,15 +267,24 @@ public class UltimateNormiePlugin extends Plugin
 		}
 		prestigeMode = true;
 		prestigeBankOpened = false;
-		incineratedValue = 0;
 		totalCoinsSnapshot = 0;
+		final long remaining = PRESTIGE_COST - incineratedValue;
 		clientThread.invokeLater(() ->
 		{
+			if (incineratedValue > 0)
+			{
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"Prestige resumed! " + formatGp(incineratedValue) + " / " + formatGp(PRESTIGE_COST)
+						+ " (" + formatGp(remaining) + " remaining). Open a bank to continue.", null);
+			}
+			else
+			{
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"Prestige mode activated! Open a bank and use the incinerator to destroy "
+						+ formatGp(PRESTIGE_COST) + " in coins.", null);
+			}
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-				"Prestige mode activated! Open a bank and use the incinerator to destroy "
-					+ formatGp(PRESTIGE_COST) + " in coins.", null);
-			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-			"Coins left in your bank will be withdrawn when you close the bank.", null);
+				"Coins left in your bank will be withdrawn when you close the bank.", null);
 		});
 		leaderboardPanel.setPrestigeMode(true, incineratedValue, PRESTIGE_COST);
 	}
@@ -284,11 +297,47 @@ public class UltimateNormiePlugin extends Plugin
 		}
 		prestigeMode = false;
 		prestigeBankOpened = false;
-		incineratedValue = 0;
 		totalCoinsSnapshot = 0;
-		client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-			"Prestige cancelled.", null);
-		leaderboardPanel.setPrestigeMode(false, 0, PRESTIGE_COST);
+		if (incineratedValue > 0)
+		{
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+				"Prestige paused. Progress saved: " + formatGp(incineratedValue)
+					+ " / " + formatGp(PRESTIGE_COST) + ".", null);
+		}
+		else
+		{
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+				"Prestige cancelled.", null);
+		}
+		leaderboardPanel.setPrestigeMode(false, incineratedValue, PRESTIGE_COST);
+	}
+
+	private static final String CONFIG_GROUP = "ultimatepkmanmode";
+	private static final String CONFIG_INCINERATED = "incineratedValue";
+
+	private void saveIncineratedValue()
+	{
+		configManager.setRSProfileConfiguration(CONFIG_GROUP, CONFIG_INCINERATED, incineratedValue);
+	}
+
+	private void loadIncineratedValue()
+	{
+		String val = configManager.getRSProfileConfiguration(CONFIG_GROUP, CONFIG_INCINERATED);
+		if (val != null)
+		{
+			try
+			{
+				incineratedValue = Long.parseLong(val);
+			}
+			catch (NumberFormatException e)
+			{
+				incineratedValue = 0;
+			}
+		}
+		else
+		{
+			incineratedValue = 0;
+		}
 	}
 
 	private void completePrestige()
@@ -296,6 +345,7 @@ public class UltimateNormiePlugin extends Plugin
 		prestigeMode = false;
 		prestigeBankOpened = false;
 		incineratedValue = 0;
+		saveIncineratedValue();
 		totalCoinsSnapshot = 0;
 		// Force-close the bank so normal restrictions resume
 		client.runScript(29);
@@ -303,8 +353,10 @@ public class UltimateNormiePlugin extends Plugin
 		leaderboardPanel.setPrestigeMode(false, 0, PRESTIGE_COST);
 		leaderboardClient.postPrestige(LEADERBOARD_URL, LEADERBOARD_API_KEY, lastPlayerName, prestige ->
 		{
+			playerPrestige = prestige;
 			clientThread.invokeLater(() ->
 			{
+				reregisterChatSkull();
 				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
 					"Prestige complete! You are now prestige " + prestige + ".", null);
 			});
@@ -344,6 +396,7 @@ public class UltimateNormiePlugin extends Plugin
 		if (burned > 0)
 		{
 			incineratedValue += burned;
+			saveIncineratedValue();
 			long remaining = PRESTIGE_COST - incineratedValue;
 			leaderboardPanel.setPrestigeMode(true, incineratedValue, PRESTIGE_COST);
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
@@ -417,9 +470,11 @@ public class UltimateNormiePlugin extends Plugin
 			long bankCoins = countCoinsIn(InventoryID.BANK);
 			if (bankCoins > 0)
 			{
+				incineratedValue = 0;
+				saveIncineratedValue();
 				cancelPrestige();
 				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-					"Prestige cancelled! You closed the bank with "
+					"Prestige progress LOST! You closed the bank with "
 						+ formatGp(bankCoins) + " coins still deposited.", null);
 			}
 			else
@@ -443,6 +498,13 @@ public class UltimateNormiePlugin extends Plugin
 			{
 				leaderboardPanel.setPrestigeEnabled(lastWealth >= PRESTIGE_COST);
 			}
+
+			// Fetch prestige level on first tick after login
+			if (pendingPrestigeFetch)
+			{
+				pendingPrestigeFetch = false;
+				leaderboardPanel.triggerRefresh();
+			}
 		}
 	}
 
@@ -453,7 +515,21 @@ public class UltimateNormiePlugin extends Plugin
 			|| event.getGameState() == GameState.HOPPING
 			|| event.getGameState() == GameState.CONNECTION_LOST)
 		{
-			cancelPrestige();
+			if (prestigeMode)
+			{
+				prestigeMode = false;
+				prestigeBankOpened = false;
+				totalCoinsSnapshot = 0;
+				leaderboardPanel.setPrestigeMode(false, incineratedValue, PRESTIGE_COST);
+			}
+		}
+
+		// Load saved progress on login
+		if (event.getGameState() == GameState.LOGGED_IN)
+		{
+			loadIncineratedValue();
+			leaderboardPanel.setPrestigeMode(false, incineratedValue, PRESTIGE_COST);
+			pendingPrestigeFetch = true;
 		}
 
 		if ((event.getGameState() == GameState.LOGIN_SCREEN
@@ -469,11 +545,20 @@ public class UltimateNormiePlugin extends Plugin
 	@Subscribe
 	public void onActorDeath(ActorDeath event)
 	{
-		if (prestigeMode && event.getActor() == client.getLocalPlayer())
+		if (event.getActor() == client.getLocalPlayer() && incineratedValue > 0)
 		{
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
 				"You died! Prestige progress has been lost.", null);
-			cancelPrestige();
+			incineratedValue = 0;
+			saveIncineratedValue();
+			if (prestigeMode)
+			{
+				cancelPrestige();
+			}
+			else
+			{
+				leaderboardPanel.setPrestigeMode(false, 0, PRESTIGE_COST);
+			}
 		}
 	}
 
@@ -508,9 +593,9 @@ public class UltimateNormiePlugin extends Plugin
 			wealthCalculator.clearLootingBagCache();
 		}
 
-		// Prestige mode: before bank is opened, cancel if player does anything
-		// other than walking to a bank or opening it
-		if (prestigeMode && !prestigeBankOpened)
+		// Prestige mode: before the first bank visit (no progress yet),
+		// cancel if player does anything other than walking to a bank
+		if (prestigeMode && !prestigeBankOpened && incineratedValue == 0)
 		{
 			final boolean isBenign = option.equals("walk here")
 				|| option.equals("cancel")
@@ -994,12 +1079,25 @@ public class UltimateNormiePlugin extends Plugin
 		{
 			return;
 		}
+		final int color = prestigeSkullColor();
 		final IndexedSprite[] modIcons = client.getModIcons();
 		if (modIcons != null && skullModIconIndex < modIcons.length)
 		{
-			modIcons[skullModIconIndex] = createSkullIndexedSprite(prestigeSkullColor());
+			modIcons[skullModIconIndex] = createSkullIndexedSprite(color);
 			client.setModIcons(modIcons);
 		}
+		// Update the overlay skull (by display name) to match
+		chatPromptSkullOverlay.updateSkullColor(prestigeSkullAwtColor(), playerPrestige >= 9, playerPrestige >= 10);
+	}
+
+	private java.awt.Color prestigeSkullAwtColor()
+	{
+		final int c = prestigeSkullColor();
+		if (c <= 0x000003)
+		{
+			return java.awt.Color.BLACK;
+		}
+		return new java.awt.Color(c);
 	}
 
 	private int prestigeSkullColor()
@@ -1011,39 +1109,97 @@ public class UltimateNormiePlugin extends Plugin
 			case 2: return 0xFF7F00; // Orange
 			case 3: return 0xFFFF00; // Yellow
 			case 4: return 0x00FF00; // Green
-			case 5: return 0x0000FF; // Blue
+			case 5: return 0x0064FF; // Blue
 			case 6: return 0x4B0082; // Indigo
 			case 7: return 0x8B00FF; // Violet
-			default: return 0x111111; // Black
+			case 8: return 0x000001;  // Inverted (white outline, black fill)
+			case 9: return 0x000002;  // Inverted + horns
+			default: return 0x000003; // Gilded horned (gold outline, black fill, red eyes)
 		}
 	}
 
 	private IndexedSprite createSkullIndexedSprite(int fillColor)
 	{
+		final boolean inverted = fillColor >= 0x000001 && fillColor <= 0x000003;
+		final boolean horned = fillColor == 0x000002 || fillColor == 0x000003;
+		final boolean gilded = fillColor == 0x000003;
 		final int w = 12;
 		final int h = 12;
 		final int[] argb = new int[w * h];
 		Arrays.fill(argb, 0);
 
-		final int BLACK = 0xFF000000;
-		final int FILL = 0xFF000000 | fillColor;
+		final int GOLD = 0xFFFFD700;
+		final int RED  = 0xFFFF0000;
+		final int OUTLINE = gilded ? GOLD : (inverted ? 0xFFFFFFFF : 0xFF000000);
+		final int FILL    = inverted ? 0xFF000000 : (0xFF000000 | fillColor);
+		final int DETAIL  = gilded ? GOLD : (inverted ? 0xFFFFFFFF : 0xFF000000);
+		final int EYES    = gilded ? RED : DETAIL;
 
-		fill(argb, w, 3, 1, 6, 1, BLACK);
-		fill(argb, w, 2, 2, 8, 1, BLACK);
-		fill(argb, w, 1, 3, 10, 5, BLACK);
-		fill(argb, w, 2, 8, 8, 1, BLACK);
-		fill(argb, w, 3, 9, 6, 1, BLACK);
+		if (horned)
+		{
+			// Horns: 1px tip, widening down into skull sides
+			fill(argb, w, 0, 0, 1, 1, OUTLINE);  // left tip
+			fill(argb, w, 0, 1, 2, 1, OUTLINE);  // left widen
+			fill(argb, w, 1, 2, 2, 1, OUTLINE);  // left base
+			fill(argb, w, 11, 0, 1, 1, OUTLINE); // right tip
+			fill(argb, w, 10, 1, 2, 1, OUTLINE); // right widen
+			fill(argb, w, 9, 2, 2, 1, OUTLINE);  // right base
+			// Skull body (horns merge into sides)
+			fill(argb, w, 3, 2, 6, 1, OUTLINE);
+			fill(argb, w, 2, 3, 8, 1, OUTLINE);
+			fill(argb, w, 1, 3, 1, 5, OUTLINE);  // left side column
+			fill(argb, w, 10, 3, 1, 5, OUTLINE); // right side column
+			fill(argb, w, 2, 4, 8, 4, OUTLINE);
+			fill(argb, w, 2, 8, 8, 1, OUTLINE);
+			fill(argb, w, 3, 9, 6, 1, OUTLINE);
 
-		fill(argb, w, 3, 2, 6, 1, FILL);
-		fill(argb, w, 2, 3, 8, 5, FILL);
-		fill(argb, w, 3, 8, 6, 1, FILL);
+			fill(argb, w, 3, 3, 6, 1, FILL);
+			fill(argb, w, 2, 4, 8, 4, FILL);
+			fill(argb, w, 3, 8, 6, 1, FILL);
 
-		fill(argb, w, 3, 4, 2, 2, BLACK);
-		fill(argb, w, 7, 4, 2, 2, BLACK);
-		fill(argb, w, 5, 6, 2, 1, BLACK);
+			fill(argb, w, 3, 5, 2, 2, EYES);
+			fill(argb, w, 7, 5, 2, 2, EYES);
+			fill(argb, w, 5, 7, 2, 1, DETAIL);
 
-		fill(argb, w, 4, 9, 1, 1, BLACK);
-		fill(argb, w, 6, 9, 1, 1, BLACK);
+			fill(argb, w, 4, 9, 1, 1, DETAIL);
+			fill(argb, w, 6, 9, 1, 1, DETAIL);
+		}
+		else
+		{
+			fill(argb, w, 3, 1, 6, 1, OUTLINE);
+			fill(argb, w, 2, 2, 8, 1, OUTLINE);
+			fill(argb, w, 1, 3, 10, 5, OUTLINE);
+			fill(argb, w, 2, 8, 8, 1, OUTLINE);
+			fill(argb, w, 3, 9, 6, 1, OUTLINE);
+
+			fill(argb, w, 3, 2, 6, 1, FILL);
+			fill(argb, w, 2, 3, 8, 5, FILL);
+			fill(argb, w, 3, 8, 6, 1, FILL);
+
+			fill(argb, w, 3, 4, 2, 2, DETAIL);
+			fill(argb, w, 7, 4, 2, 2, DETAIL);
+			fill(argb, w, 5, 6, 2, 1, DETAIL);
+
+			fill(argb, w, 4, 9, 1, 1, DETAIL);
+			fill(argb, w, 6, 9, 1, 1, DETAIL);
+		}
+
+		// Build palette from unique colors used
+		final java.util.LinkedHashMap<Integer, Byte> paletteMap = new java.util.LinkedHashMap<>();
+		paletteMap.put(0, (byte) 0); // transparent
+		for (int c : argb)
+		{
+			if ((c >>> 24) != 0 && !paletteMap.containsKey(c & 0x00FFFFFF))
+			{
+				paletteMap.put(c & 0x00FFFFFF, (byte) paletteMap.size());
+			}
+		}
+		final int[] palette = new int[paletteMap.size()];
+		int idx = 0;
+		for (int key : paletteMap.keySet())
+		{
+			palette[idx++] = key;
+		}
 
 		final IndexedSprite sprite = client.createIndexedSprite();
 		sprite.setWidth(w);
@@ -1053,7 +1209,6 @@ public class UltimateNormiePlugin extends Plugin
 		sprite.setOffsetX(0);
 		sprite.setOffsetY(0);
 
-		final int[] palette = new int[]{0, 0x000000, fillColor};
 		sprite.setPalette(palette);
 
 		final byte[] pixels = new byte[w * h];
@@ -1064,13 +1219,10 @@ public class UltimateNormiePlugin extends Plugin
 			{
 				pixels[i] = 0;
 			}
-			else if ((c & 0x00FFFFFF) == 0x000000)
-			{
-				pixels[i] = 1;
-			}
 			else
 			{
-				pixels[i] = 2;
+				final Byte pi = paletteMap.get(c & 0x00FFFFFF);
+				pixels[i] = pi != null ? pi : 0;
 			}
 		}
 		sprite.setPixels(pixels);

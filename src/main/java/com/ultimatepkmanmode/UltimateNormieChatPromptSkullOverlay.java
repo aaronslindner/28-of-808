@@ -1,5 +1,6 @@
 package com.ultimatepkmanmode;
 
+import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
@@ -11,22 +12,26 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
-import net.runelite.client.util.ImageUtil;
 
 public class UltimateNormieChatPromptSkullOverlay extends Overlay
 {
 	private static final int ICON_SIZE = 12;
 
 	private final Client client;
-	private final BufferedImage skull;
+	private volatile BufferedImage skull;
 
 	@Inject
 	public UltimateNormieChatPromptSkullOverlay(Client client)
 	{
 		this.client = client;
-		this.skull = createSkullIcon();
+		this.skull = LeaderboardPanel.createSkullImage(Color.WHITE, ICON_SIZE);
 		setPosition(OverlayPosition.DYNAMIC);
 		setLayer(OverlayLayer.UNDER_WIDGETS);
+	}
+
+	public void updateSkullColor(Color fill, boolean horned, boolean gilded)
+	{
+		this.skull = LeaderboardPanel.createSkullImage(fill, ICON_SIZE, horned, gilded);
 	}
 
 	@Override
@@ -55,35 +60,4 @@ public class UltimateNormieChatPromptSkullOverlay extends Overlay
 		return null;
 	}
 
-	private BufferedImage createSkullIcon()
-	{
-		final BufferedImage img = new BufferedImage(ICON_SIZE, ICON_SIZE, BufferedImage.TYPE_INT_ARGB);
-		final Graphics2D g = img.createGraphics();
-		try
-		{
-			g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
-			g.setColor(new java.awt.Color(255, 255, 255, 255));
-			g.fillRect(3, 1, 6, 1);
-			g.fillRect(2, 2, 8, 1);
-			g.fillRect(1, 3, 10, 5);
-			g.fillRect(2, 8, 8, 1);
-			g.fillRect(3, 9, 6, 1);
-			g.setColor(new java.awt.Color(0, 0, 0, 255));
-			g.fillRect(3, 2, 6, 1);
-			g.fillRect(2, 3, 8, 5);
-			g.fillRect(3, 8, 6, 1);
-			g.setColor(new java.awt.Color(255, 255, 255, 255));
-			g.fillRect(3, 4, 2, 2);
-			g.fillRect(7, 4, 2, 2);
-			g.fillRect(5, 6, 2, 1);
-			g.fillRect(4, 9, 1, 1);
-			g.fillRect(6, 9, 1, 1);
-		}
-		finally
-		{
-			g.dispose();
-		}
-
-		return ImageUtil.resizeImage(img, ICON_SIZE, ICON_SIZE);
-	}
 }
