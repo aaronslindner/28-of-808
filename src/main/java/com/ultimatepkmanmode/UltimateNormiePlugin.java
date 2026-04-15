@@ -271,7 +271,7 @@ public class UltimateNormiePlugin extends Plugin
 				"Prestige mode activated! Open a bank and use the incinerator to destroy "
 					+ formatGp(PRESTIGE_COST) + " in coins.", null);
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-				"Close the bank at any time to cancel.", null);
+			"Coins left in your bank will be withdrawn when you close the bank.", null);
 		});
 		leaderboardPanel.setPrestigeMode(true, incineratedValue, PRESTIGE_COST);
 	}
@@ -410,10 +410,25 @@ public class UltimateNormiePlugin extends Plugin
 			tradePassedFirstScreen = false;
 		}
 
-		// Prestige mode: cancel if bank was opened then closed
+		// Prestige mode: bank closed — check for coins left in bank
 		if (prestigeMode && prestigeBankOpened && client.getWidget(12, 0) == null)
 		{
-			cancelPrestige();
+			prestigeBankOpened = false;
+			long bankCoins = countCoinsIn(InventoryID.BANK);
+			if (bankCoins > 0)
+			{
+				cancelPrestige();
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"Prestige cancelled! You closed the bank with "
+						+ formatGp(bankCoins) + " coins still deposited.", null);
+			}
+			else
+			{
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"Prestige still active. Progress: " + formatGp(incineratedValue)
+						+ " / " + formatGp(PRESTIGE_COST) + ". Open a bank to continue.", null);
+				leaderboardPanel.setPrestigeMode(true, incineratedValue, PRESTIGE_COST);
+			}
 		}
 
 		// Leaderboard: snapshot wealth while logged in for posting on logout
@@ -534,6 +549,21 @@ public class UltimateNormiePlugin extends Plugin
 			}
 		}
 
+		// Prestige mode: in bank, block close if coins remain in bank
+		if (prestigeMode && client.getWidget(12, 0) != null && option.equals("close"))
+		{
+			long bankCoins = countCoinsIn(InventoryID.BANK);
+			if (bankCoins > 0)
+			{
+				event.consume();
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"You still have " + formatGp(bankCoins)
+						+ " coins in the bank. Withdraw or incinerate them first!", null);
+				pendingBoop = true;
+				return;
+			}
+		}
+
 		// Prestige mode: in bank, block withdraw/deposit/destroy of non-coin items
 		if (prestigeMode && client.getWidget(12, 0) != null)
 		{
@@ -541,6 +571,14 @@ public class UltimateNormiePlugin extends Plugin
 			final boolean isWithdraw = option.startsWith("withdraw");
 			final boolean isDeposit = option.startsWith("deposit");
 			final boolean isDestroy = option.equals("destroy");
+			if (isDestroy && isCoins && incineratedValue >= PRESTIGE_COST)
+			{
+				event.consume();
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"You have already sacrificed enough! Withdraw your remaining coins.", null);
+				pendingBoop = true;
+				return;
+			}
 			if ((isWithdraw || isDeposit || isDestroy) && !isCoins)
 			{
 				event.consume();

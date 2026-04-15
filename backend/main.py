@@ -141,6 +141,22 @@ async def prestige(data: PrestigeRequest, x_api_key: str = Header()):
     return {"ok": True, "prestige": new_prestige}
 
 
+@app.post("/prestige/reset")
+async def reset_prestige(data: PrestigeRequest, x_api_key: str = Header()):
+    if x_api_key != API_KEY:
+        raise HTTPException(401, "Invalid API key")
+    if not data.player_name or len(data.player_name) > 12:
+        raise HTTPException(400, "Invalid player name")
+
+    async with pool.acquire() as con:
+        await con.execute("""
+            UPDATE leaderboard
+            SET prestige = 0, updated_at = now()
+            WHERE player_name = $1
+        """, data.player_name)
+    return {"ok": True, "prestige": 0}
+
+
 @app.delete("/leaderboard")
 async def clear_leaderboard(x_api_key: str = Header()):
     if x_api_key != API_KEY:

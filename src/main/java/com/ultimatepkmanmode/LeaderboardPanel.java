@@ -238,12 +238,7 @@ public class LeaderboardPanel extends PluginPanel
 		{
 			return "";
 		}
-		StringBuilder sb = new StringBuilder(" ");
-		for (int i = 0; i < prestige; i++)
-		{
-			sb.append("\u2620");
-		}
-		return sb.toString();
+		return " \u2620";
 	}
 
 	private static Color prestigeColor(int prestige)
@@ -270,7 +265,7 @@ public class LeaderboardPanel extends PluginPanel
 
 		final String rankText = rank > 0 ? "#" + rank : "???";
 		final JLabel nameLabel = new JLabel(rankText + "  " + name + prestigeSkull(prestige));
-		nameLabel.setForeground(new Color(100, 200, 255));
+		nameLabel.setForeground(prestige > 0 ? prestigeColor(prestige) : Color.WHITE);
 		nameLabel.setFont(nameLabel.getFont().deriveFont(Font.BOLD));
 		row.add(nameLabel, BorderLayout.WEST);
 
