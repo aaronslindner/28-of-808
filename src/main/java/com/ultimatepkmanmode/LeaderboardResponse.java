@@ -26,5 +26,7 @@ public class LeaderboardResponse
 		private String playerName;
 
 		private long wealth;
+
+		private int prestige;
 	}
 }

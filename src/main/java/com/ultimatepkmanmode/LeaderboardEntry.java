@@ -11,6 +11,8 @@ public class LeaderboardEntry
 
 	private long wealth;
 
+	private int prestige;
+
 	@SerializedName("updated_at")
 	private String updatedAt;
 }

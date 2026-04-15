@@ -23,8 +23,12 @@ async def startup():
             CREATE TABLE IF NOT EXISTS leaderboard (
                 player_name TEXT PRIMARY KEY,
                 wealth      BIGINT  NOT NULL,
+                prestige    INT     NOT NULL DEFAULT 0,
                 updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
             )
+        """)
+        await con.execute("""
+            ALTER TABLE leaderboard ADD COLUMN IF NOT EXISTS prestige INT NOT NULL DEFAULT 0
         """)
 
 
@@ -69,18 +73,18 @@ async def get_leaderboard(
     async with pool.acquire() as con:
         total = await con.fetchval("SELECT COUNT(*) FROM leaderboard")
         rows = await con.fetch("""
-            SELECT player_name, wealth, updated_at
+            SELECT player_name, wealth, prestige, updated_at
             FROM leaderboard
-            ORDER BY wealth DESC
+            ORDER BY prestige DESC, wealth DESC
             LIMIT $1 OFFSET $2
         """, page_size, offset)
 
         player_rank = None
         if player:
             rank_row = await con.fetchrow("""
-                SELECT rank, player_name, wealth FROM (
-                    SELECT player_name, wealth,
-                           RANK() OVER (ORDER BY wealth DESC) as rank
+                SELECT rank, player_name, wealth, prestige FROM (
+                    SELECT player_name, wealth, prestige,
+                           RANK() OVER (ORDER BY prestige DESC, wealth DESC) as rank
                     FROM leaderboard
                 ) sub
                 WHERE player_name = $1
@@ -90,6 +94,7 @@ async def get_leaderboard(
                     "rank": rank_row["rank"],
                     "player_name": rank_row["player_name"],
                     "wealth": rank_row["wealth"],
+                    "prestige": rank_row.get("prestige", 0),
                 }
 
     return {
@@ -100,11 +105,40 @@ async def get_leaderboard(
             {
                 "player_name": r["player_name"],
                 "wealth": r["wealth"],
+                "prestige": r["prestige"],
                 "updated_at": r["updated_at"].isoformat(),
             }
             for r in rows
         ],
     }
+
+
+class PrestigeRequest(BaseModel):
+    player_name: str
+
+
+@app.post("/prestige")
+async def prestige(data: PrestigeRequest, x_api_key: str = Header()):
+    if x_api_key != API_KEY:
+        raise HTTPException(401, "Invalid API key")
+    if not data.player_name or len(data.player_name) > 12:
+        raise HTTPException(400, "Invalid player name")
+
+    async with pool.acquire() as con:
+        row = await con.fetchrow(
+            "SELECT prestige FROM leaderboard WHERE player_name = $1",
+            data.player_name,
+        )
+        if not row:
+            raise HTTPException(404, "Player not found on leaderboard")
+
+        new_prestige = row["prestige"] + 1
+        await con.execute("""
+            UPDATE leaderboard
+            SET prestige = $1, updated_at = now()
+            WHERE player_name = $2
+        """, new_prestige, data.player_name)
+    return {"ok": True, "prestige": new_prestige}
 
 
 @app.delete("/leaderboard")

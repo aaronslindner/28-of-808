@@ -16,8 +16,11 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.IndexedSprite;
 import net.runelite.api.SoundEffectVolume;
+import net.runelite.api.Item;
 import net.runelite.api.ItemComposition;
+import net.runelite.api.ItemContainer;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
@@ -30,6 +33,7 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
@@ -49,6 +53,9 @@ public class UltimateNormiePlugin extends Plugin
 	private static final int VARCI_INPUT_TYPE = 5;
 	private static final String LEADERBOARD_URL = "https://28-of-808-production.up.railway.app";
 	private static final String LEADERBOARD_API_KEY = "Texhad99bottlesonthewall!";
+	private static final long PRESTIGE_COST = 10_000L; // TODO: restore to 1_000_000_000L after testing
+	private static final int COINS = 995;
+	private static final int PLATINUM_TOKEN = 13204;
 
 	private int gameTick = 0;
 	private int geClickedNonSubmitTick = -1;
@@ -59,6 +66,14 @@ public class UltimateNormiePlugin extends Plugin
 	private int tradeItemChangedTick = -1;
 	private long lastWealth = 0;
 	private String lastPlayerName = null;
+
+	private int playerPrestige = 0;
+
+	// Prestige mode state
+	private boolean prestigeMode = false;
+	private boolean prestigeBankOpened = false;
+	private long totalCoinsSnapshot = 0;
+	private long incineratedValue = 0;
 
 	public int getLimitPct()
 	{
@@ -176,6 +191,9 @@ public class UltimateNormiePlugin extends Plugin
 	private LeaderboardClient leaderboardClient;
 
 	@Inject
+	private ClientThread clientThread;
+
+	@Inject
 	private ClientToolbar clientToolbar;
 
 	private LeaderboardPanel leaderboardPanel;
@@ -195,14 +213,25 @@ public class UltimateNormiePlugin extends Plugin
 	{
 		overlayManager.add(tradeBalanceOverlay);
 		overlayManager.add(chatPromptSkullOverlay);
-		registerChatSkullIcon();
+		registerChatSkullIcon(prestigeSkullColor());
 
 		leaderboardPanel = new LeaderboardPanel();
 		leaderboardPanel.setPageCallback(page ->
 			leaderboardClient.fetchLeaderboard(LEADERBOARD_URL, lastPlayerName, page, response ->
-				leaderboardPanel.rebuild(response)
-			)
+			{
+				leaderboardPanel.rebuild(response);
+				if (response != null && response.getPlayerRank() != null)
+				{
+					final int newPrestige = response.getPlayerRank().getPrestige();
+					if (newPrestige != playerPrestige)
+					{
+						playerPrestige = newPrestige;
+						clientThread.invokeLater(() -> reregisterChatSkull());
+					}
+				}
+			})
 		);
+		leaderboardPanel.setPrestigeCallback(this::startPrestige);
 		navButton = NavigationButton.builder()
 			.tooltip("UNM Leaderboard")
 			.icon(createNavIcon())
@@ -219,6 +248,121 @@ public class UltimateNormiePlugin extends Plugin
 		overlayManager.remove(chatPromptSkullOverlay);
 		unregisterChatSkullIcon();
 		clientToolbar.removeNavigation(navButton);
+		cancelPrestige();
+	}
+
+	public void startPrestige()
+	{
+		if (prestigeMode)
+		{
+			return;
+		}
+		if (lastWealth < PRESTIGE_COST)
+		{
+			return;
+		}
+		prestigeMode = true;
+		prestigeBankOpened = false;
+		incineratedValue = 0;
+		totalCoinsSnapshot = 0;
+		clientThread.invokeLater(() ->
+		{
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+				"Prestige mode activated! Open a bank and use the incinerator to destroy "
+					+ formatGp(PRESTIGE_COST) + " in coins.", null);
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+				"Close the bank at any time to cancel.", null);
+		});
+		leaderboardPanel.setPrestigeMode(true, incineratedValue, PRESTIGE_COST);
+	}
+
+	private void cancelPrestige()
+	{
+		if (!prestigeMode)
+		{
+			return;
+		}
+		prestigeMode = false;
+		prestigeBankOpened = false;
+		incineratedValue = 0;
+		totalCoinsSnapshot = 0;
+		client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+			"Prestige cancelled.", null);
+		leaderboardPanel.setPrestigeMode(false, 0, PRESTIGE_COST);
+	}
+
+	private void completePrestige()
+	{
+		prestigeMode = false;
+		prestigeBankOpened = false;
+		incineratedValue = 0;
+		totalCoinsSnapshot = 0;
+		// Force-close the bank so normal restrictions resume
+		client.runScript(29);
+		// Reset UI immediately so the button doesn't stay stuck
+		leaderboardPanel.setPrestigeMode(false, 0, PRESTIGE_COST);
+		leaderboardClient.postPrestige(LEADERBOARD_URL, LEADERBOARD_API_KEY, lastPlayerName, prestige ->
+		{
+			clientThread.invokeLater(() ->
+			{
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"Prestige complete! You are now prestige " + prestige + ".", null);
+			});
+			leaderboardPanel.triggerRefresh();
+		});
+	}
+
+	private long countCoinsIn(int inventoryId)
+	{
+		final ItemContainer container = client.getItemContainer(inventoryId);
+		if (container == null)
+		{
+			return 0;
+		}
+		long total = 0;
+		for (Item item : container.getItems())
+		{
+			if (item.getId() == COINS)
+			{
+				total += item.getQuantity();
+			}
+		}
+		return total;
+	}
+
+	private void snapshotTotalCoins()
+	{
+		totalCoinsSnapshot = countCoinsIn(InventoryID.BANK) + countCoinsIn(InventoryID.INV);
+	}
+
+	private void checkBankIncinerationProgress()
+	{
+		long currentTotal = countCoinsIn(InventoryID.BANK) + countCoinsIn(InventoryID.INV);
+
+		// Only count decreases in the combined total (coins truly destroyed)
+		long burned = totalCoinsSnapshot - currentTotal;
+		if (burned > 0)
+		{
+			incineratedValue += burned;
+			long remaining = PRESTIGE_COST - incineratedValue;
+			leaderboardPanel.setPrestigeMode(true, incineratedValue, PRESTIGE_COST);
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+				"Sacrificed " + formatGp(burned) + " towards prestige.", null);
+			if (remaining > 0)
+			{
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"Progress: " + formatGp(incineratedValue) + " / " + formatGp(PRESTIGE_COST)
+						+ " (" + formatGp(remaining) + " remaining)", null);
+			}
+		}
+
+		// Always update snapshot to current total
+		totalCoinsSnapshot = currentTotal;
+
+		if (incineratedValue >= PRESTIGE_COST)
+		{
+			completePrestige();
+		}
 	}
 
 	@Subscribe
@@ -226,6 +370,14 @@ public class UltimateNormiePlugin extends Plugin
 	{
 		if (DISABLE_BANKING && (event.getGroupId() == 12 || event.getGroupId() == 192))
 		{
+			if (prestigeMode)
+			{
+				prestigeBankOpened = true;
+				snapshotTotalCoins();
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"Deposit coins, then drag them to the incinerator to destroy.", null);
+				return;
+			}
 			client.runScript(29);
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Banking is disabled.", null);
 			pendingBoop = true;
@@ -258,6 +410,12 @@ public class UltimateNormiePlugin extends Plugin
 			tradePassedFirstScreen = false;
 		}
 
+		// Prestige mode: cancel if bank was opened then closed
+		if (prestigeMode && prestigeBankOpened && client.getWidget(12, 0) == null)
+		{
+			cancelPrestige();
+		}
+
 		// Leaderboard: snapshot wealth while logged in for posting on logout
 		if (config.leaderboardEnabled()
 			&& client.getGameState() == GameState.LOGGED_IN
@@ -266,12 +424,23 @@ public class UltimateNormiePlugin extends Plugin
 			lastWealth = wealthCalculator.calculateWealth();
 			lastPlayerName = client.getLocalPlayer().getName();
 			leaderboardPanel.setPlayerName(lastPlayerName);
+			if (!prestigeMode)
+			{
+				leaderboardPanel.setPrestigeEnabled(lastWealth >= PRESTIGE_COST);
+			}
 		}
 	}
 
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
+		if (event.getGameState() == GameState.LOGIN_SCREEN
+			|| event.getGameState() == GameState.HOPPING
+			|| event.getGameState() == GameState.CONNECTION_LOST)
+		{
+			cancelPrestige();
+		}
+
 		if ((event.getGameState() == GameState.LOGIN_SCREEN
 			|| event.getGameState() == GameState.HOPPING)
 			&& config.leaderboardEnabled()
@@ -283,11 +452,27 @@ public class UltimateNormiePlugin extends Plugin
 	}
 
 	@Subscribe
+	public void onActorDeath(ActorDeath event)
+	{
+		if (prestigeMode && event.getActor() == client.getLocalPlayer())
+		{
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+				"You died! Prestige progress has been lost.", null);
+			cancelPrestige();
+		}
+	}
+
+	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
 		if (event.getContainerId() == InventoryID.LOOTING_BAG)
 		{
 			wealthCalculator.updateLootingBagCache();
+		}
+
+		if (prestigeMode && prestigeBankOpened && event.getContainerId() == InventoryID.BANK)
+		{
+			checkBankIncinerationProgress();
 		}
 
 		if (client.getWidget(335, 10) != null)
@@ -308,12 +493,65 @@ public class UltimateNormiePlugin extends Plugin
 			wealthCalculator.clearLootingBagCache();
 		}
 
+		// Prestige mode: before bank is opened, cancel if player does anything
+		// other than walking to a bank or opening it
+		if (prestigeMode && !prestigeBankOpened)
+		{
+			final boolean isBenign = option.equals("walk here")
+				|| option.equals("cancel")
+				|| option.equals("examine")
+				|| isBankInteraction(option, target);
+			if (!isBenign)
+			{
+				cancelPrestige();
+			}
+		}
+
+		// Prestige mode: block trading and GE while active
+		if (prestigeMode)
+		{
+			final boolean isTrade = option.contains("trade");
+			final boolean isGe = option.contains("exchange") || option.contains("collect")
+				|| option.contains("offer") || option.contains("buy") || option.contains("sell");
+			if (isTrade || isGe)
+			{
+				event.consume();
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"In order to prestige, you must sacrifice 1B coins.", null);
+				pendingBoop = true;
+				return;
+			}
+		}
+
 		if (DISABLE_BANKING && isBankInteraction(option, target))
 		{
-			event.consume();
-			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Banking is disabled.", null);
-			pendingBoop = true;
-			return;
+			if (!prestigeMode)
+			{
+				event.consume();
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Banking is disabled.", null);
+				pendingBoop = true;
+				return;
+			}
+		}
+
+		// Prestige mode: in bank, block withdraw/deposit/destroy of non-coin items
+		if (prestigeMode && client.getWidget(12, 0) != null)
+		{
+			final boolean isCoins = target.contains("coins");
+			final boolean isWithdraw = option.startsWith("withdraw");
+			final boolean isDeposit = option.startsWith("deposit");
+			final boolean isDestroy = option.equals("destroy");
+			if ((isWithdraw || isDeposit || isDestroy) && !isCoins)
+			{
+				event.consume();
+				if (isDestroy)
+				{
+					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"Only coins may be incinerated during prestige.", null);
+				}
+				pendingBoop = true;
+				return;
+			}
 		}
 
 		final boolean isGeOfferOpen = client.getWidget(465, 24) != null;
@@ -685,7 +923,7 @@ public class UltimateNormiePlugin extends Plugin
 		client.refreshChat();
 	}
 
-	private void registerChatSkullIcon()
+	private void registerChatSkullIcon(int fillColor)
 	{
 		final IndexedSprite[] modIcons = client.getModIcons();
 		if (modIcons == null)
@@ -696,7 +934,7 @@ public class UltimateNormiePlugin extends Plugin
 		priorModIcons = modIcons;
 		skullModIconIndex = modIcons.length;
 
-		final IndexedSprite skull = createSkullIndexedSprite();
+		final IndexedSprite skull = createSkullIndexedSprite(fillColor);
 		final IndexedSprite[] newModIcons = Arrays.copyOf(modIcons, modIcons.length + 1);
 		newModIcons[skullModIconIndex] = skull;
 		client.setModIcons(newModIcons);
@@ -712,7 +950,37 @@ public class UltimateNormiePlugin extends Plugin
 		skullModIconIndex = -1;
 	}
 
-	private IndexedSprite createSkullIndexedSprite()
+	private void reregisterChatSkull()
+	{
+		if (skullModIconIndex < 0)
+		{
+			return;
+		}
+		final IndexedSprite[] modIcons = client.getModIcons();
+		if (modIcons != null && skullModIconIndex < modIcons.length)
+		{
+			modIcons[skullModIconIndex] = createSkullIndexedSprite(prestigeSkullColor());
+			client.setModIcons(modIcons);
+		}
+	}
+
+	private int prestigeSkullColor()
+	{
+		switch (playerPrestige)
+		{
+			case 0: return 0xFFFFFF; // White (non-prestige)
+			case 1: return 0xFF0000; // Red
+			case 2: return 0xFF7F00; // Orange
+			case 3: return 0xFFFF00; // Yellow
+			case 4: return 0x00FF00; // Green
+			case 5: return 0x0000FF; // Blue
+			case 6: return 0x4B0082; // Indigo
+			case 7: return 0x8B00FF; // Violet
+			default: return 0x111111; // Black
+		}
+	}
+
+	private IndexedSprite createSkullIndexedSprite(int fillColor)
 	{
 		final int w = 12;
 		final int h = 12;
@@ -720,7 +988,7 @@ public class UltimateNormiePlugin extends Plugin
 		Arrays.fill(argb, 0);
 
 		final int BLACK = 0xFF000000;
-		final int WHITE = 0xFFFFFFFF;
+		final int FILL = 0xFF000000 | fillColor;
 
 		fill(argb, w, 3, 1, 6, 1, BLACK);
 		fill(argb, w, 2, 2, 8, 1, BLACK);
@@ -728,9 +996,9 @@ public class UltimateNormiePlugin extends Plugin
 		fill(argb, w, 2, 8, 8, 1, BLACK);
 		fill(argb, w, 3, 9, 6, 1, BLACK);
 
-		fill(argb, w, 3, 2, 6, 1, WHITE);
-		fill(argb, w, 2, 3, 8, 5, WHITE);
-		fill(argb, w, 3, 8, 6, 1, WHITE);
+		fill(argb, w, 3, 2, 6, 1, FILL);
+		fill(argb, w, 2, 3, 8, 5, FILL);
+		fill(argb, w, 3, 8, 6, 1, FILL);
 
 		fill(argb, w, 3, 4, 2, 2, BLACK);
 		fill(argb, w, 7, 4, 2, 2, BLACK);
@@ -747,7 +1015,7 @@ public class UltimateNormiePlugin extends Plugin
 		sprite.setOffsetX(0);
 		sprite.setOffsetY(0);
 
-		final int[] palette = new int[]{0, 0x000000, 0xFFFFFF};
+		final int[] palette = new int[]{0, 0x000000, fillColor};
 		sprite.setPalette(palette);
 
 		final byte[] pixels = new byte[w * h];
@@ -760,11 +1028,11 @@ public class UltimateNormiePlugin extends Plugin
 			}
 			else if ((c & 0x00FFFFFF) == 0x000000)
 			{
-				pixels[i] = 2;
+				pixels[i] = 1;
 			}
 			else
 			{
-				pixels[i] = 1;
+				pixels[i] = 2;
 			}
 		}
 		sprite.setPixels(pixels);

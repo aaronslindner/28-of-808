@@ -9,7 +9,7 @@ public interface UltimateNormieConfig extends Config
 {
 	@ConfigItem(
 		keyName = "leaderboardEnabled",
-		name = "Enable Leaderboard",
+		name = "Opt in/Enable Leaderboard",
 		description = "Post your wealth to the global UNM leaderboard",
 		position = 1
 	)

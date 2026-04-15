@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.swing.SwingUtilities;
@@ -57,6 +58,47 @@ public class LeaderboardClient
 			public void onResponse(Call call, Response response)
 			{
 				response.close();
+			}
+		});
+	}
+
+	public void postPrestige(String baseUrl, String apiKey, String playerName, IntConsumer callback)
+	{
+		final JsonObject body = new JsonObject();
+		body.addProperty("player_name", playerName);
+
+		final Request request = new Request.Builder()
+			.url(baseUrl + "/prestige")
+			.header("X-Api-Key", apiKey)
+			.post(RequestBody.create(JSON, gson.toJson(body)))
+			.build();
+
+		httpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.debug("Prestige POST failed: {}", e.getMessage());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				try
+				{
+					final okhttp3.ResponseBody respBody = response.body();
+					if (!response.isSuccessful() || respBody == null)
+					{
+						return;
+					}
+					final JsonObject json = gson.fromJson(respBody.string(), JsonObject.class);
+					final int prestige = json.get("prestige").getAsInt();
+					SwingUtilities.invokeLater(() -> callback.accept(prestige));
+				}
+				finally
+				{
+					response.close();
+				}
 			}
 		});
 	}
