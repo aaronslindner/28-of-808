@@ -203,7 +203,6 @@ public class UltimateNormiePlugin extends Plugin
 	private LeaderboardPanel leaderboardPanel;
 	private NavigationButton navButton;
 
-	private IndexedSprite[] priorModIcons;
 	private int skullModIconIndex = -1;
 
 	@Provides
@@ -1018,9 +1017,14 @@ public class UltimateNormiePlugin extends Plugin
 			return;
 		}
 
-		if (event.getType() == ChatMessageType.PRIVATECHAT
-			|| event.getType() == ChatMessageType.PRIVATECHATOUT
-			|| event.getType() == ChatMessageType.MODPRIVATECHAT)
+		final ChatMessageType type = event.getType();
+		if (type == ChatMessageType.PRIVATECHAT
+			|| type == ChatMessageType.PRIVATECHATOUT
+			|| type == ChatMessageType.MODPRIVATECHAT
+			|| type == ChatMessageType.CLAN_CHAT
+			|| type == ChatMessageType.CLAN_GUEST_CHAT
+			|| type == ChatMessageType.CLAN_GIM_CHAT
+			|| type == ChatMessageType.FRIENDSCHAT)
 		{
 			return;
 		}
@@ -1043,7 +1047,6 @@ public class UltimateNormiePlugin extends Plugin
 		}
 
 		event.getMessageNode().setName("<img=" + skullModIconIndex + "> " + event.getName());
-		client.refreshChat();
 	}
 
 	private void registerChatSkullIcon(int fillColor)
@@ -1054,7 +1057,6 @@ public class UltimateNormiePlugin extends Plugin
 			return;
 		}
 
-		priorModIcons = modIcons;
 		skullModIconIndex = modIcons.length;
 
 		final IndexedSprite skull = createSkullIndexedSprite(fillColor);
@@ -1065,11 +1067,14 @@ public class UltimateNormiePlugin extends Plugin
 
 	private void unregisterChatSkullIcon()
 	{
-		if (priorModIcons != null)
+		if (skullModIconIndex >= 0)
 		{
-			client.setModIcons(priorModIcons);
+			final IndexedSprite[] current = client.getModIcons();
+			if (current != null && skullModIconIndex < current.length)
+			{
+				client.setModIcons(Arrays.copyOf(current, skullModIconIndex));
+			}
 		}
-		priorModIcons = null;
 		skullModIconIndex = -1;
 	}
 
