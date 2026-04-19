@@ -863,7 +863,7 @@ public class UltimateNormiePlugin extends Plugin
 			{
 				continue;
 			}
-			final int price = (id == 995) ? 1 : (id == 13204) ? 1000 : itemManager.getItemPrice(id);
+			final int price = (id == COINS) ? 1 : (id == PLATINUM_TOKEN) ? 1000 : itemManager.getItemPrice(id);
 			if (price <= 0)
 			{
 				return -1;
@@ -892,7 +892,7 @@ public class UltimateNormiePlugin extends Plugin
 			{
 				continue;
 			}
-			if (id == 995 || id == 13204)
+			if (id == COINS || id == PLATINUM_TOKEN)
 			{
 				continue;
 			}
@@ -1017,14 +1017,9 @@ public class UltimateNormiePlugin extends Plugin
 			return;
 		}
 
-		final ChatMessageType type = event.getType();
-		if (type == ChatMessageType.PRIVATECHAT
-			|| type == ChatMessageType.PRIVATECHATOUT
-			|| type == ChatMessageType.MODPRIVATECHAT
-			|| type == ChatMessageType.CLAN_CHAT
-			|| type == ChatMessageType.CLAN_GUEST_CHAT
-			|| type == ChatMessageType.CLAN_GIM_CHAT
-			|| type == ChatMessageType.FRIENDSCHAT)
+		if (event.getType() == ChatMessageType.PRIVATECHAT
+			|| event.getType() == ChatMessageType.PRIVATECHATOUT
+			|| event.getType() == ChatMessageType.MODPRIVATECHAT)
 		{
 			return;
 		}
@@ -1046,7 +1041,9 @@ public class UltimateNormiePlugin extends Plugin
 			return;
 		}
 
-		event.getMessageNode().setName("<img=" + skullModIconIndex + "> " + event.getName());
+		// Prepend skull to name with no space so tag-stripping yields the clean name
+		// (the game strips <img> tags before clan rank lookup; a space would break the match)
+		event.getMessageNode().setName("<img=" + skullModIconIndex + ">" + event.getName());
 	}
 
 	private void registerChatSkullIcon(int fillColor)
