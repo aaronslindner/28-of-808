@@ -46,7 +46,6 @@ import net.runelite.client.util.Text;
 )
 public class UltimateNormiePlugin extends Plugin
 {
-	private static final boolean DISABLE_BANKING = true;
 	private static final int LIMIT_PCT = 10;
 	private static final long ABSOLUTE_CAP_GP = 5_000_000;
 	private static final int GE_CUSTOM_ENTRY_COOLDOWN = 2;
@@ -284,6 +283,16 @@ public class UltimateNormiePlugin extends Plugin
 			}
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
 				"Coins left in your bank will be withdrawn when you close the bank.", null);
+
+			// If the bank is already open when prestige is activated, start tracking immediately
+			// (otherwise we'd miss the WidgetLoaded that already fired before prestige started).
+			if (client.getWidget(12, 0) != null || client.getWidget(192, 0) != null)
+			{
+				prestigeBankOpened = true;
+				snapshotTotalCoins();
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"Deposit coins, then drag them to the incinerator to destroy.", null);
+			}
 		});
 		leaderboardPanel.setPrestigeMode(true, incineratedValue, PRESTIGE_COST);
 	}
@@ -350,6 +359,12 @@ public class UltimateNormiePlugin extends Plugin
 		client.runScript(29);
 		// Reset UI immediately so the button doesn't stay stuck
 		leaderboardPanel.setPrestigeMode(false, 0, PRESTIGE_COST);
+
+		// Acknowledge completion immediately, regardless of leaderboard reachability.
+		// The exact prestige number will be confirmed when the leaderboard responds.
+		client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+			"Prestige complete! Your sacrifice has been recorded.", null);
+
 		leaderboardClient.postPrestige(LEADERBOARD_URL, LEADERBOARD_API_KEY, lastPlayerName, prestige ->
 		{
 			playerPrestige = prestige;
@@ -357,7 +372,7 @@ public class UltimateNormiePlugin extends Plugin
 			{
 				reregisterChatSkull();
 				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-					"Prestige complete! You are now prestige " + prestige + ".", null);
+					"You are now prestige " + prestige + ".", null);
 			});
 			leaderboardPanel.triggerRefresh();
 		});
@@ -420,18 +435,43 @@ public class UltimateNormiePlugin extends Plugin
 	@Subscribe
 	public void onWidgetLoaded(WidgetLoaded event)
 	{
-		if (DISABLE_BANKING && (event.getGroupId() == 12 || event.getGroupId() == 192))
+		final boolean isBankWidget = event.getGroupId() == 12 || event.getGroupId() == 192;
+
+		// Prestige bank-opened tracking must run regardless of the allowBank toggle.
+		if (isBankWidget && prestigeMode && !prestigeBankOpened)
 		{
-			if (prestigeMode)
-			{
-				prestigeBankOpened = true;
-				snapshotTotalCoins();
-				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-					"Deposit coins, then drag them to the incinerator to destroy.", null);
-				return;
-			}
+			prestigeBankOpened = true;
+			snapshotTotalCoins();
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+				"Deposit coins, then drag them to the incinerator to destroy.", null);
+		}
+
+		// Force-close the bank when banking is disallowed and we're not in prestige.
+		if (!config.allowBank() && isBankWidget && !prestigeMode)
+		{
 			client.runScript(29);
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Banking is disabled.", null);
+			pendingBoop = true;
+			return;
+		}
+
+		// Force-close GE offer screen when GE is disallowed (group 465).
+		// Other GE surfaces (collection box, main interface) are blocked at the
+		// menu-option level instead, since their group IDs overlap with non-GE
+		// widgets (e.g. the Colosseum continue dialog).
+		if (!config.allowGe() && !prestigeMode && event.getGroupId() == 465)
+		{
+			client.runScript(29);
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Grand Exchange is disabled.", null);
+			pendingBoop = true;
+			return;
+		}
+
+		// Force-close trade window when trading is disallowed (groups 335 = first screen, 334 = second)
+		if (!config.allowTrade() && !prestigeMode && (event.getGroupId() == 335 || event.getGroupId() == 334))
+		{
+			client.runScript(29);
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Trading is disabled.", null);
 			pendingBoop = true;
 		}
 	}
@@ -592,20 +632,6 @@ public class UltimateNormiePlugin extends Plugin
 			wealthCalculator.clearLootingBagCache();
 		}
 
-		// Prestige mode: before the first bank visit (no progress yet),
-		// cancel if player does anything other than walking to a bank
-		if (prestigeMode && !prestigeBankOpened && incineratedValue == 0)
-		{
-			final boolean isBenign = option.equals("walk here")
-				|| option.equals("cancel")
-				|| option.equals("examine")
-				|| isBankInteraction(option, target);
-			if (!isBenign)
-			{
-				cancelPrestige();
-			}
-		}
-
 		// Prestige mode: block trading and GE while active
 		if (prestigeMode)
 		{
@@ -622,12 +648,51 @@ public class UltimateNormiePlugin extends Plugin
 			}
 		}
 
-		if (DISABLE_BANKING && isBankInteraction(option, target))
+		if (!config.allowBank() && isBankInteraction(option, target))
 		{
 			if (!prestigeMode)
 			{
 				event.consume();
 				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Banking is disabled.", null);
+				pendingBoop = true;
+				return;
+			}
+		}
+
+		// Block trade requests at the source when trading is disallowed
+		if (!config.allowTrade() && !prestigeMode && option.equals("trade with"))
+		{
+			event.consume();
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Trading is disabled.", null);
+			pendingBoop = true;
+			return;
+		}
+
+		// Block GE-related menu options when GE is disallowed
+		// (covers Exchange on GE clerks/booths and Collect on bankers/bank chests/clerks,
+		//  plus collect-item clicks inside the collection box widget)
+		if (!config.allowGe() && !prestigeMode)
+		{
+			// Collection-box widget interactions: option is "collect-item" / "collect-note" / "collect-bank"
+			if (option.startsWith("collect-"))
+			{
+				event.consume();
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Grand Exchange is disabled.", null);
+				pendingBoop = true;
+				return;
+			}
+
+			final boolean targetIsGeOrBanker = target.contains("banker")
+				|| target.contains("bank chest")
+				|| target.contains("bank booth")
+				|| target.contains("grand exchange")
+				|| target.contains("exchange clerk")
+				|| target.contains("exchange booth");
+			if (targetIsGeOrBanker
+				&& (option.equals("collect") || option.equals("exchange") || option.equals("history")))
+			{
+				event.consume();
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Grand Exchange is disabled.", null);
 				pendingBoop = true;
 				return;
 			}
@@ -688,28 +753,40 @@ public class UltimateNormiePlugin extends Plugin
 
 			if (isSubmitLike)
 			{
-				// Block if a price/quantity change happened within the last 1 tick
-				if (gameTick - geClickedNonSubmitTick < 1)
+				// GE disallowed entirely
+				if (!config.allowGe())
 				{
 					event.consume();
-					return;
-				}
-
-				// Block if a custom price/quantity chatbox was recently opened;
-				// the widget text lags behind the actual entered value.
-				if (gameTick - geCustomEntryTick < GE_CUSTOM_ENTRY_COOLDOWN)
-				{
-					event.consume();
-					return;
-				}
-
-				final String reason = validateGeOffer();
-				if (reason != null)
-				{
-					event.consume();
-					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", reason, null);
+					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Grand Exchange is disabled.", null);
 					pendingBoop = true;
-					geClickedNonSubmitTick = gameTick;
+					return;
+				}
+
+				if (config.enforceGeValidation())
+				{
+					// Block if a price/quantity change happened within the last 1 tick
+					if (gameTick - geClickedNonSubmitTick < 1)
+					{
+						event.consume();
+						return;
+					}
+
+					// Block if a custom price/quantity chatbox was recently opened;
+					// the widget text lags behind the actual entered value.
+					if (gameTick - geCustomEntryTick < GE_CUSTOM_ENTRY_COOLDOWN)
+					{
+						event.consume();
+						return;
+					}
+
+					final String reason = validateGeOffer();
+					if (reason != null)
+					{
+						event.consume();
+						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", reason, null);
+						pendingBoop = true;
+						geClickedNonSubmitTick = gameTick;
+					}
 				}
 				return;
 			}
@@ -731,41 +808,50 @@ public class UltimateNormiePlugin extends Plugin
 		{
 			if (option.contains("accept"))
 			{
-				// Block if another trade click happened this exact tick (same-tick exploit guard)
-				if (tradeClickedNonAcceptTick == gameTick)
+				// Trade disallowed entirely
+				if (!config.allowTrade())
 				{
 					event.consume();
+					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Trading is disabled.", null);
+					pendingBoop = true;
 					return;
 				}
 
-				// First trade screen: validate from offer widgets
-				if (tradeScreen1 != null)
+				if (config.enforceTradeValidation())
 				{
-					// Block if items changed within the last 5 ticks (~3s stabilisation window)
-					if (gameTick - tradeItemChangedTick < 5)
+					// Block if another trade click happened this exact tick (same-tick exploit guard)
+					if (tradeClickedNonAcceptTick == gameTick)
 					{
 						event.consume();
 						return;
 					}
-					final String reason = validateTrade();
-					if (reason != null)
-					{
-						tradePassedFirstScreen = false;
-						event.consume();
-						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", reason, null);
-						pendingBoop = true;
-					}
-					else
-					{
-						tradePassedFirstScreen = true;
-					}
-					return;
-				}
 
-				// Second trade screen: block if first screen validation failed
-				if (tradeScreen2 != null)
-				{
-					if (!tradePassedFirstScreen)
+					// First trade screen: validate from offer widgets
+					if (tradeScreen1 != null)
+					{
+						// Block if items changed within the last 5 ticks (~3s stabilisation window)
+						if (gameTick - tradeItemChangedTick < 5)
+						{
+							event.consume();
+							return;
+						}
+						final String reason = validateTrade();
+						if (reason != null)
+						{
+							tradePassedFirstScreen = false;
+							event.consume();
+							client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", reason, null);
+							pendingBoop = true;
+						}
+						else
+						{
+							tradePassedFirstScreen = true;
+						}
+						return;
+					}
+
+					// Second trade screen: block if first screen validation failed
+					if (tradeScreen2 != null && !tradePassedFirstScreen)
 					{
 						event.consume();
 					}

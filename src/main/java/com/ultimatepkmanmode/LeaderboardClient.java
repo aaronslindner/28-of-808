@@ -4,6 +4,9 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.util.Collections;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import javax.inject.Inject;
@@ -23,9 +26,17 @@ import okhttp3.Response;
 public class LeaderboardClient
 {
 	private static final MediaType JSON = MediaType.get("application/json");
+	// Retry delays in seconds for prestige POST (4 attempts total).
+	private static final long[] PRESTIGE_RETRY_DELAYS_SEC = { 2, 5, 15 };
 
 	private final OkHttpClient httpClient;
 	private final Gson gson;
+	private final ScheduledExecutorService retryExecutor = Executors.newSingleThreadScheduledExecutor(r ->
+	{
+		Thread t = new Thread(r, "UNM-LeaderboardRetry");
+		t.setDaemon(true);
+		return t;
+	});
 
 	@Inject
 	public LeaderboardClient(OkHttpClient httpClient, Gson gson)
@@ -73,12 +84,18 @@ public class LeaderboardClient
 			.post(RequestBody.create(JSON, gson.toJson(body)))
 			.build();
 
+		attemptPostPrestige(request, callback, 0);
+	}
+
+	private void attemptPostPrestige(Request request, IntConsumer callback, int attempt)
+	{
 		httpClient.newCall(request).enqueue(new Callback()
 		{
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
-				log.debug("Prestige POST failed: {}", e.getMessage());
+				log.debug("Prestige POST failed (attempt {}): {}", attempt + 1, e.getMessage());
+				scheduleRetry(request, callback, attempt);
 			}
 
 			@Override
@@ -89,11 +106,19 @@ public class LeaderboardClient
 					final okhttp3.ResponseBody respBody = response.body();
 					if (!response.isSuccessful() || respBody == null)
 					{
+						log.debug("Prestige POST non-success (attempt {}): code={}",
+							attempt + 1, response.code());
+						scheduleRetry(request, callback, attempt);
 						return;
 					}
 					final JsonObject json = gson.fromJson(respBody.string(), JsonObject.class);
 					final int prestige = json.get("prestige").getAsInt();
 					SwingUtilities.invokeLater(() -> callback.accept(prestige));
+				}
+				catch (Exception e)
+				{
+					log.debug("Prestige POST parse failed (attempt {}): {}", attempt + 1, e.getMessage());
+					scheduleRetry(request, callback, attempt);
 				}
 				finally
 				{
@@ -101,6 +126,21 @@ public class LeaderboardClient
 				}
 			}
 		});
+	}
+
+	private void scheduleRetry(Request request, IntConsumer callback, int attempt)
+	{
+		if (attempt >= PRESTIGE_RETRY_DELAYS_SEC.length)
+		{
+			log.warn("Prestige POST gave up after {} attempts", attempt + 1);
+			return;
+		}
+		final long delaySec = PRESTIGE_RETRY_DELAYS_SEC[attempt];
+		log.debug("Retrying prestige POST in {}s (attempt {} of {})",
+			delaySec, attempt + 2, PRESTIGE_RETRY_DELAYS_SEC.length + 1);
+		retryExecutor.schedule(
+			() -> attemptPostPrestige(request, callback, attempt + 1),
+			delaySec, TimeUnit.SECONDS);
 	}
 
 	public void fetchLeaderboard(String baseUrl, String playerName, int page, Consumer<LeaderboardResponse> callback)
