@@ -58,9 +58,14 @@ public class UltimateNormiePlugin extends Plugin
 	private boolean pendingBoop = false;
 	private int tradeItemChangedTick = -1;
 
-	// Upgrade-mode bank-saving tracking
+	// Upgrade-mode bank-saving tracking.
+	// Pre-existing bank coins are INELIGIBLE; only coins deposited during the current
+	// bank session contribute to the saving goal. Closing the bank rolls the session
+	// off, so any remaining "eligible" coins become pre-existing (ineligible) on reopen.
 	private boolean savingBankOpen = false;
-	private long totalCoinsSnapshot = 0;
+	private long lastBankCoins = 0;
+	private long lastInvCoins = 0;
+	private long eligibleBankCoins = 0;
 
 	// Chat skull
 	private int skullModIconIndex = -1;
@@ -122,7 +127,7 @@ public class UltimateNormiePlugin extends Plugin
 		});
 
 		navButton = NavigationButton.builder()
-			.tooltip("Upgrade Mode")
+			.tooltip("UNM Upgrades")
 			.icon(UpgradePanel.createNavIcon())
 			.panel(upgradePanel)
 			.priority(10)
@@ -139,8 +144,15 @@ public class UltimateNormiePlugin extends Plugin
 		clientToolbar.removeNavigation(navButton);
 		upgradeManager.setOnChange(null);
 		clientThread.invokeLater(this::unregisterChatSkullIcon);
+		resetSavingSession();
+	}
+
+	private void resetSavingSession()
+	{
 		savingBankOpen = false;
-		totalCoinsSnapshot = 0;
+		lastBankCoins = 0;
+		lastInvCoins = 0;
+		eligibleBankCoins = 0;
 	}
 
 	// ----------------- Helpers -----------------
@@ -234,32 +246,68 @@ public class UltimateNormiePlugin extends Plugin
 		return total;
 	}
 
-	private void snapshotTotalCoins()
+	private void startSavingSession()
 	{
-		totalCoinsSnapshot = countCoinsIn(InventoryID.BANK) + countCoinsIn(InventoryID.INV);
+		lastBankCoins = countCoinsIn(InventoryID.BANK);
+		lastInvCoins = countCoinsIn(InventoryID.INV);
+		eligibleBankCoins = 0; // pre-existing bank coins are NOT eligible
 	}
 
-	private void checkIncinerationProgress()
+	/**
+	 * Re-reads bank+inv coin totals after a container change, updates the eligible pool,
+	 * and credits any newly-incinerated coins (capped to what was eligible) to the goal.
+	 */
+	private void onSavingContainerChanged()
 	{
-		final long current = countCoinsIn(InventoryID.BANK) + countCoinsIn(InventoryID.INV);
-		final long burned = totalCoinsSnapshot - current;
-		if (burned > 0)
+		final long bankNow = countCoinsIn(InventoryID.BANK);
+		final long invNow = countCoinsIn(InventoryID.INV);
+		final long bankDelta = bankNow - lastBankCoins;
+		final long invDelta = invNow - lastInvCoins;
+		final long destroyed = (lastBankCoins + lastInvCoins) - (bankNow + invNow);
+
+		if (destroyed > 0 && bankDelta < 0)
 		{
-			final UpgradeManager.ApplyResult r = upgradeManager.applyBurned(burned);
-			if (r.applied > 0)
+			// Coins were incinerated (or otherwise removed without entering inv) from the bank.
+			final long credit = Math.min(destroyed, eligibleBankCoins);
+			eligibleBankCoins -= credit;
+			if (credit > 0)
 			{
-				final String dest = r.activatedUpgrade != null ? r.activatedUpgrade.getDisplayName() : "your goal";
-				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-					"Sacrificed " + formatGp(r.applied) + " toward " + dest + ".", null);
+				final UpgradeManager.ApplyResult r = upgradeManager.applyBurned(credit);
+				if (r.applied > 0)
+				{
+					final String dest = r.activatedUpgrade != null ? r.activatedUpgrade.getDisplayName() : "your goal";
+					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"Sacrificed " + formatGp(r.applied) + " toward " + dest + ".", null);
+				}
+				if (r.wasActivated())
+				{
+					client.runScript(29); // close the bank
+					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"Upgrade unlocked: " + r.activatedUpgrade.getDisplayName() + "!", null);
+				}
 			}
-			if (r.wasActivated())
+			final long ineligibleDestroyed = destroyed - credit;
+			if (ineligibleDestroyed > 0)
 			{
-				client.runScript(29); // close the bank
 				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-					"Upgrade unlocked: " + r.activatedUpgrade.getDisplayName() + "!", null);
+					"Wasted " + formatGp(ineligibleDestroyed) + " of ineligible coins (no progress credited).", null);
 			}
 		}
-		totalCoinsSnapshot = current;
+		else if (bankDelta > 0 && invDelta <= 0)
+		{
+			// Deposit (coins moved inv->bank, or gained directly into bank). Newly-eligible.
+			eligibleBankCoins += bankDelta;
+		}
+		else if (bankDelta < 0 && invDelta > 0)
+		{
+			// Withdrawal (coins moved bank->inv). They leave the eligible pool; they'd need
+			// to be re-deposited within this session to count again.
+			final long withdrawn = Math.min(-bankDelta, invDelta);
+			eligibleBankCoins -= Math.min(withdrawn, eligibleBankCoins);
+		}
+
+		lastBankCoins = bankNow;
+		lastInvCoins = invNow;
 	}
 
 	// ----------------- Subscribers -----------------
@@ -294,13 +342,18 @@ public class UltimateNormiePlugin extends Plugin
 				if (!savingBankOpen)
 				{
 					savingBankOpen = true;
-					snapshotTotalCoins();
+					startSavingSession();
 					final Upgrade goal = upgradeManager.getSelectedGoal();
 					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
 						"Saving for " + goal.getDisplayName()
-							+ ". Drag coins onto the incinerator to make progress.", null);
+							+ ". Make sure the Bank Incinerator is enabled, then deposit fresh coins and drag them onto the Incinerator.", null);
+					if (lastBankCoins > 0)
+					{
+						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+							"NOTE: " + formatGp(lastBankCoins) + " already in bank are INELIGIBLE. Convert them to platinum tokens at a GE clerk or accept they cannot contribute.", null);
+					}
 					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-						"Closing the bank with coins still inside will reset your goal progress.", null);
+						"Coins remaining in bank when you close it become ineligible on reopen \u2014 incinerate fully before closing.", null);
 				}
 				return;
 			}
@@ -353,20 +406,29 @@ public class UltimateNormiePlugin extends Plugin
 			tradePassedFirstScreen = false;
 		}
 
-		// Detect bank-close while saving. If coins remain inside, wipe goal progress.
+		// If the player cleared their goal mid-session, force-close the bank cleanly.
+		if (savingBankOpen
+			&& !upgradeManager.isBankingUnlocked()
+			&& upgradeManager.getSelectedGoal() == null
+			&& client.getWidget(12, 0) != null)
+		{
+			client.runScript(29);
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+				"Goal cleared. Banking closed.", null);
+			resetSavingSession();
+		}
+
+		// Detect bank-close while saving. Any eligible coins remaining become pre-existing
+		// (and therefore ineligible) on the next bank open. We just inform the player.
 		if (savingBankOpen && client.getWidget(12, 0) == null)
 		{
-			savingBankOpen = false;
-			final long remaining = countCoinsIn(InventoryID.BANK);
-			if (remaining > 0 && upgradeManager.getSelectedGoal() != null)
+			final long strandedEligible = eligibleBankCoins;
+			resetSavingSession();
+			if (strandedEligible > 0)
 			{
-				final Upgrade goal = upgradeManager.getSelectedGoal();
-				final long lost = upgradeManager.getProgress(goal);
-				upgradeManager.wipeGoalProgress();
 				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-					"Goal progress LOST! You closed the bank with " + formatGp(remaining)
-						+ " coins still inside (forfeited " + formatGp(lost) + " toward "
-						+ goal.getDisplayName() + ").", null);
+					"Bank closed with " + formatGp(strandedEligible)
+						+ " eligible coins inside. They are now ineligible \u2014 only coins deposited in a new session can count.", null);
 				pendingBoop = true;
 			}
 		}
@@ -380,9 +442,11 @@ public class UltimateNormiePlugin extends Plugin
 			wealthCalculator.updateLootingBagCache();
 		}
 
-		if (savingBankOpen && event.getContainerId() == InventoryID.BANK)
+		if (savingBankOpen
+			&& (event.getContainerId() == InventoryID.BANK
+				|| event.getContainerId() == InventoryID.INV))
 		{
-			checkIncinerationProgress();
+			onSavingContainerChanged();
 		}
 
 		if (client.getWidget(335, 10) != null)
@@ -402,8 +466,7 @@ public class UltimateNormiePlugin extends Plugin
 		final boolean hadAnything = upgradeManager.getActiveCount() > 0
 			|| upgradeManager.getSelectedGoal() != null;
 		upgradeManager.hardWipe();
-		savingBankOpen = false;
-		totalCoinsSnapshot = 0;
+		resetSavingSession();
 		if (hadAnything)
 		{
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",

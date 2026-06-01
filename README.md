@@ -6,11 +6,12 @@ By default the plugin is fully strict: no banking, GE submissions clamped to ±1
 
 ## How Upgrade Mode works
 
-1. Open the **Upgrade Mode** sidebar panel and click **[Set]** on an available upgrade.
-2. Walk to a bank, open it, and drag coins onto the **incinerator**. Each coin destroyed counts toward your selected goal.
-3. When the goal's cost is reached, the upgrade automatically activates for the rest of your life.
-4. **Closing the bank with coins still inside wipes your current goal's progress** (anti-banking exploit).
-5. **Dying wipes all progress and active upgrades.** Start over from strict.
+1. Open the **UNM Upgrades** sidebar panel and click **[Set]** on an available upgrade.
+2. **Enable the Bank Incinerator** in the bank's settings (it's not on by default).
+3. Walk to a bank, open it, deposit fresh coins, then drag them onto the **incinerator**. Each coin destroyed counts toward your selected goal.
+4. **Only coins deposited during the current bank session count.** Coins already in the bank when you open it are *ineligible* — convert them to platinum tokens at a GE clerk if you want to keep them off the bank.
+5. **Closing the bank with eligible coins still inside makes them ineligible on reopen** (so you can't bank coins between sessions; you must incinerate fully before closing).
+6. **Dying wipes all progress and active upgrades.** Start over from strict.
 
 ## Upgrade tree
 
@@ -33,7 +34,8 @@ A child upgrade can only be purchased while its parent is **active this life**. 
 ### Banking
 
 - All banking interactions blocked unless the **Banking Unlock** upgrade is active OR a goal is selected.
-- While saving, the bank widget is allowed to open for incineration only — non-coin operations are blocked, and closing with coins still inside forfeits the goal's progress.
+- While saving, the bank widget is allowed to open for incineration only — non-coin operations are blocked, and only coins deposited during the current session count toward the goal.
+- Clearing the goal while the bank is open force-closes the bank.
 - Loot chests, deposit boxes, and CoX private storage units follow the same rule.
 - Looting bag remains fully functional regardless of upgrades.
 

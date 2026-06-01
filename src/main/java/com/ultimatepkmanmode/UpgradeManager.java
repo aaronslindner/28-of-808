@@ -98,21 +98,6 @@ public class UpgradeManager
 		}
 	}
 
-	/**
-	 * Wipes only the currently-selected goal's accumulated progress and clears the goal slot.
-	 * Used to punish closing the bank with coins still inside while saving.
-	 */
-	public void wipeGoalProgress()
-	{
-		if (selectedGoal != null)
-		{
-			progress.put(selectedGoal, 0L);
-			selectedGoal = null;
-			save();
-			fireChange();
-		}
-	}
-
 	/** Wipes ALL upgrade state for the current life: progress, active set, goal. */
 	public void hardWipe()
 	{

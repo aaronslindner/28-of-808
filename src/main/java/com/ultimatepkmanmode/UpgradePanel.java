@@ -54,7 +54,7 @@ public class UpgradePanel extends PluginPanel
 
 		removeAll();
 
-		final JLabel header = new JLabel("Upgrade Mode");
+		final JLabel header = new JLabel("UNM Upgrades");
 		header.setFont(FontManager.getRunescapeBoldFont());
 		header.setForeground(Color.WHITE);
 		header.setBorder(BorderFactory.createEmptyBorder(8, 8, 4, 8));
@@ -70,6 +70,10 @@ public class UpgradePanel extends PluginPanel
 		body.add(separator());
 		body.add(Box.createVerticalStrut(8));
 		body.add(buildGoalSection());
+		body.add(Box.createVerticalStrut(8));
+		body.add(separator());
+		body.add(Box.createVerticalStrut(8));
+		body.add(buildRulesSection());
 		body.add(Box.createVerticalStrut(8));
 		body.add(separator());
 		body.add(Box.createVerticalStrut(8));
@@ -158,12 +162,29 @@ public class UpgradePanel extends PluginPanel
 		sec.add(Box.createVerticalStrut(2));
 		final JLabel hint = new JLabel(
 			"<html><body style='width:170px'>"
-				+ "Open a bank and drag coins onto the incinerator to make progress."
+				+ "Open a bank, deposit fresh coins, then drag them onto the Incinerator.<br><br>"
+				+ "<b>See \"How saving works\" below for full rules.</b>"
 				+ "</body></html>");
 		hint.setForeground(Color.GRAY);
 		hint.setAlignmentX(Component.LEFT_ALIGNMENT);
 		sec.add(hint);
 
+		return sec;
+	}
+
+	private JPanel buildRulesSection()
+	{
+		final JPanel sec = section("How saving works");
+		final JLabel rules = new JLabel(
+			"<html><body style='width:170px'>"
+				+ "\u2022 <b>Enable Bank Incinerator</b> first (Bank \u2192 settings \u2192 Incinerator).<br>"
+				+ "\u2022 <b>Only coins deposited during the current bank session count.</b> Coins already in the bank are <span style='color:#cc7777'>ineligible</span> \u2014 convert them to platinum tokens at a GE clerk if you want to keep them off the bank.<br>"
+				+ "\u2022 <b>Closing the bank with eligible coins still inside makes them ineligible on reopen.</b> Always incinerate fully before closing.<br>"
+				+ "\u2022 <b>Dying wipes ALL progress and active upgrades.</b>"
+				+ "</body></html>");
+		rules.setForeground(Color.LIGHT_GRAY);
+		rules.setAlignmentX(Component.LEFT_ALIGNMENT);
+		sec.add(rules);
 		return sec;
 	}
 
