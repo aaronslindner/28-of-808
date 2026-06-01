@@ -37,7 +37,7 @@ public class UpgradePanel extends PluginPanel
 
 	public UpgradePanel(UpgradeManager mgr)
 	{
-		super(false);
+		super(true);
 		this.mgr = mgr;
 		setLayout(new BorderLayout());
 		setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -73,11 +73,11 @@ public class UpgradePanel extends PluginPanel
 		body.add(Box.createVerticalStrut(8));
 		body.add(separator());
 		body.add(Box.createVerticalStrut(8));
-		body.add(buildRulesSection());
+		body.add(buildAvailableSection());
 		body.add(Box.createVerticalStrut(8));
 		body.add(separator());
 		body.add(Box.createVerticalStrut(8));
-		body.add(buildAvailableSection());
+		body.add(buildRulesSection());
 
 		add(body, BorderLayout.CENTER);
 		revalidate();
