@@ -2,10 +2,15 @@ package com.ultimatepkmanmode;
 
 public enum Upgrade
 {
+	// ============================================================================
+	// !!! TEST MODE: all upgrade costs reduced to 1,000 gp for in-game smoke-testing.
+	// REVERT before shipping. Production costs are commented to the right of each line.
+	// ============================================================================
+
 	// Standalone
 	BANKING(
 		"Banking Unlock",
-		1_000_000_000L,
+		1_000L, // PROD: 1_000_000_000L
 		null,
 		Category.BANKING,
 		"Removes all banking restrictions for this life."),
@@ -13,21 +18,21 @@ public enum Upgrade
 	// GE chain: USE -> QUARTER -> REMOVAL
 	GE_USE(
 		"GE Use",
-		1_000_000L,
+		1_000L, // PROD: 1_000_000L
 		null,
 		Category.GE,
 		"Unlocks Grand Exchange access. Submitted offers must still match market price within \u00b110%."),
 
 	GE_QUARTER(
 		"GE \u00b125%",
-		5_000_000L,
+		1_000L, // PROD: 5_000_000L
 		GE_USE,
 		Category.GE,
 		"Loosens the GE price tolerance from \u00b110% to \u00b125%."),
 
 	GE_REMOVAL(
 		"GE Removal",
-		50_000_000L,
+		1_000L, // PROD: 50_000_000L
 		GE_QUARTER,
 		Category.GE,
 		"Removes GE price enforcement entirely. Any offer is allowed."),
@@ -35,21 +40,21 @@ public enum Upgrade
 	// Trade chain: USE -> QUARTER -> REMOVAL
 	TRADE_USE(
 		"Trade Use",
-		1_000_000L,
+		1_000L, // PROD: 1_000_000L
 		null,
 		Category.TRADE,
 		"Unlocks player trading. Trade values must still match within \u00b110%."),
 
 	TRADE_QUARTER(
 		"Trade \u00b125%",
-		1_000_000L,
+		1_000L, // PROD: 1_000_000L
 		TRADE_USE,
 		Category.TRADE,
 		"Loosens the trade value tolerance from \u00b110% to \u00b125%."),
 
 	TRADE_REMOVAL(
 		"Trade Removal",
-		10_000_000L,
+		1_000L, // PROD: 10_000_000L
 		TRADE_QUARTER,
 		Category.TRADE,
 		"Removes trade value enforcement entirely. Any trade is allowed.");
