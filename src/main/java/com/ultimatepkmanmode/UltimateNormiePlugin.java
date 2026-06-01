@@ -95,6 +95,9 @@ public class UltimateNormiePlugin extends Plugin
 	@Inject
 	private UpgradeManager upgradeManager;
 
+	@Inject
+	private ChatPromptSkullOverlay chatPromptSkullOverlay;
+
 	private UpgradePanel upgradePanel;
 	private NavigationButton navButton;
 
@@ -113,6 +116,7 @@ public class UltimateNormiePlugin extends Plugin
 	protected void startUp()
 	{
 		overlayManager.add(tradeBalanceOverlay);
+		overlayManager.add(chatPromptSkullOverlay);
 
 		upgradePanel = new UpgradePanel(upgradeManager);
 		upgradeManager.setOnChange(() ->
@@ -122,6 +126,7 @@ public class UltimateNormiePlugin extends Plugin
 			if (newCount != lastActiveCount)
 			{
 				lastActiveCount = newCount;
+				chatPromptSkullOverlay.invalidate();
 				clientThread.invokeLater(this::reregisterChatSkull);
 			}
 		});
@@ -141,6 +146,7 @@ public class UltimateNormiePlugin extends Plugin
 	protected void shutDown()
 	{
 		overlayManager.remove(tradeBalanceOverlay);
+		overlayManager.remove(chatPromptSkullOverlay);
 		clientToolbar.removeNavigation(navButton);
 		upgradeManager.setOnChange(null);
 		clientThread.invokeLater(this::unregisterChatSkullIcon);
