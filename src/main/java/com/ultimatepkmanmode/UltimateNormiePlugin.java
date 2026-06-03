@@ -28,6 +28,7 @@ import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.RuneScapeProfileChanged;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -48,6 +49,11 @@ public class UltimateNormiePlugin extends Plugin
 	private static final int VARCI_INPUT_TYPE = 5;
 	private static final int COINS = 995;
 	private static final int PLATINUM_TOKEN = 13204;
+	// Sound played when an upgrade activates. OSRS sound effect 2396 is the level-up
+	// fanfare commonly referenced by plugins. Note: the in-game level-up jingle proper
+	// is delivered via the music subsystem rather than playSoundEffect; this is the
+	// closest SFX equivalent. If silent or wrong, try 3813 (TOWN_CRIER_BELL_DING).
+	private static final int SOUND_UPGRADE_UNLOCKED = 2396;
 
 	// Tick state
 	private int gameTick = 0;
@@ -58,18 +64,21 @@ public class UltimateNormiePlugin extends Plugin
 	private boolean pendingBoop = false;
 	private int tradeItemChangedTick = -1;
 
-	// Upgrade-mode bank-saving tracking.
-	// Pre-existing bank coins are INELIGIBLE; only coins deposited during the current
-	// bank session contribute to the saving goal. Closing the bank rolls the session
-	// off, so any remaining "eligible" coins become pre-existing (ineligible) on reopen.
+	// Upgrade-mode bank-saving tracking. We just need the previous coin totals so
+	// that container-changed events can detect destruction (incineration) by seeing
+	// the bank coin count drop with no matching inventory increase.
 	private boolean savingBankOpen = false;
 	private long lastBankCoins = 0;
 	private long lastInvCoins = 0;
-	private long eligibleBankCoins = 0;
 
 	// Chat skull
 	private int skullModIconIndex = -1;
-	private int lastActiveCount = -1;
+	private int lastUnlockedCount = -1;
+
+	// Set when the player dies; wipe message is printed after the death chat fires.
+	private boolean pendingDeathWipeMessage = false;
+	private boolean pendingPurgatoryWipeMessage = false;
+	private boolean pendingUnmBankToPurgatoryMessage = false;
 
 	@Inject
 	private Client client;
@@ -118,16 +127,34 @@ public class UltimateNormiePlugin extends Plugin
 		overlayManager.add(tradeBalanceOverlay);
 		overlayManager.add(chatPromptSkullOverlay);
 
-		upgradePanel = new UpgradePanel(upgradeManager);
+		try
+		{
+			upgradePanel = new UpgradePanel(upgradeManager);
+		}
+		catch (Exception e)
+		{
+			log.error("Failed to create UpgradePanel", e);
+			throw e;
+		}
 		upgradeManager.setOnChange(() ->
 		{
-			upgradePanel.rebuild();
-			final int newCount = upgradeManager.getActiveCount();
-			if (newCount != lastActiveCount)
+			try
 			{
-				lastActiveCount = newCount;
-				chatPromptSkullOverlay.invalidate();
-				clientThread.invokeLater(this::reregisterChatSkull);
+				upgradePanel.rebuild();
+				// Skull tier reflects how many upgrades the player has UNLOCKED this life,
+				// not how many are currently toggled active. Toggling a gateway off must not
+				// regress the skull \u2014 the unlock is a permanent (until-death) milestone.
+				final int newCount = upgradeManager.getUnlockedCount();
+				if (newCount != lastUnlockedCount)
+				{
+					lastUnlockedCount = newCount;
+					chatPromptSkullOverlay.invalidate();
+					clientThread.invokeLater(this::reregisterChatSkull);
+				}
+			}
+			catch (Exception e)
+			{
+				log.error("Error in onChange callback", e);
 			}
 		});
 
@@ -158,7 +185,6 @@ public class UltimateNormiePlugin extends Plugin
 		savingBankOpen = false;
 		lastBankCoins = 0;
 		lastInvCoins = 0;
-		eligibleBankCoins = 0;
 	}
 
 	// ----------------- Helpers -----------------
@@ -256,60 +282,37 @@ public class UltimateNormiePlugin extends Plugin
 	{
 		lastBankCoins = countCoinsIn(InventoryID.BANK);
 		lastInvCoins = countCoinsIn(InventoryID.INV);
-		eligibleBankCoins = 0; // pre-existing bank coins are NOT eligible
 	}
 
 	/**
-	 * Re-reads bank+inv coin totals after a container change, updates the eligible pool,
-	 * and credits any newly-incinerated coins (capped to what was eligible) to the goal.
+	 * Re-reads bank+inv coin totals after a container change and credits any incinerated
+	 * coins to the current saving goal. We detect incineration as: the bank coin count
+	 * dropped while the total (bank+inv) also dropped \u2014 i.e., coins left the bank without
+	 * landing in the inventory.
 	 */
 	private void onSavingContainerChanged()
 	{
 		final long bankNow = countCoinsIn(InventoryID.BANK);
 		final long invNow = countCoinsIn(InventoryID.INV);
 		final long bankDelta = bankNow - lastBankCoins;
-		final long invDelta = invNow - lastInvCoins;
 		final long destroyed = (lastBankCoins + lastInvCoins) - (bankNow + invNow);
 
 		if (destroyed > 0 && bankDelta < 0)
 		{
-			// Coins were incinerated (or otherwise removed without entering inv) from the bank.
-			final long credit = Math.min(destroyed, eligibleBankCoins);
-			eligibleBankCoins -= credit;
-			if (credit > 0)
+			final UpgradeManager.ApplyResult r = upgradeManager.applyBurned(destroyed);
+			if (r.applied > 0)
 			{
-				final UpgradeManager.ApplyResult r = upgradeManager.applyBurned(credit);
-				if (r.applied > 0)
-				{
-					final String dest = r.activatedUpgrade != null ? r.activatedUpgrade.getDisplayName() : "your goal";
-					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-						"Sacrificed " + formatGp(r.applied) + " toward " + dest + ".", null);
-				}
-				if (r.wasActivated())
-				{
-					client.runScript(29); // close the bank
-					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-						"Upgrade unlocked: " + r.activatedUpgrade.getDisplayName() + "!", null);
-				}
-			}
-			final long ineligibleDestroyed = destroyed - credit;
-			if (ineligibleDestroyed > 0)
-			{
+				final String dest = r.activatedUpgrade != null ? r.activatedUpgrade.getDisplayName() : "your goal";
 				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-					"Wasted " + formatGp(ineligibleDestroyed) + " of ineligible coins (no progress credited).", null);
+					"Sacrificed " + formatGp(r.applied) + " toward " + dest + ".", null);
 			}
-		}
-		else if (bankDelta > 0 && invDelta <= 0)
-		{
-			// Deposit (coins moved inv->bank, or gained directly into bank). Newly-eligible.
-			eligibleBankCoins += bankDelta;
-		}
-		else if (bankDelta < 0 && invDelta > 0)
-		{
-			// Withdrawal (coins moved bank->inv). They leave the eligible pool; they'd need
-			// to be re-deposited within this session to count again.
-			final long withdrawn = Math.min(-bankDelta, invDelta);
-			eligibleBankCoins -= Math.min(withdrawn, eligibleBankCoins);
+			if (r.wasActivated())
+			{
+				client.runScript(29); // close the bank
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"Upgrade unlocked: " + r.activatedUpgrade.getDisplayName() + "!", null);
+				client.playSoundEffect(SOUND_UPGRADE_UNLOCKED, SoundEffectVolume.HIGH);
+			}
 		}
 
 		lastBankCoins = bankNow;
@@ -319,12 +322,23 @@ public class UltimateNormiePlugin extends Plugin
 	// ----------------- Subscribers -----------------
 
 	@Subscribe
+	public void onRuneScapeProfileChanged(RuneScapeProfileChanged event)
+	{
+		// The RS-profile-scoped config (where unlocks/progress are persisted) is only
+		// guaranteed to be loaded once this event fires; LOGGED_IN can arrive first.
+		// Reloading here ensures unlocks survive a client restart.
+		upgradeManager.load();
+		lastUnlockedCount = upgradeManager.getUnlockedCount();
+		clientThread.invokeLater(this::reregisterChatSkull);
+	}
+
+	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
 		if (event.getGameState() == GameState.LOGGED_IN)
 		{
 			upgradeManager.load();
-			lastActiveCount = upgradeManager.getActiveCount();
+			lastUnlockedCount = upgradeManager.getUnlockedCount();
 			clientThread.invokeLater(this::reregisterChatSkull);
 		}
 	}
@@ -337,32 +351,41 @@ public class UltimateNormiePlugin extends Plugin
 
 		if (isBankWidget)
 		{
+			// If a goal is selected and the main bank is opening, start the saving session
+			// for coin tracking. This must run BEFORE the banking-unlocked early return so
+			// that users who already own Banking Unlock can still progress later upgrades.
+			final boolean anyBankPass = upgradeManager.getConsumableCharges(Upgrade.DEPOSIT_PASS) > 0
+				|| upgradeManager.getConsumableCharges(Upgrade.WITHDRAWAL_PASS) > 0;
+			if (g == 12 && (upgradeManager.getSelectedGoal() != null || anyBankPass) && !savingBankOpen)
+			{
+				savingBankOpen = true;
+				startSavingSession();
+				final Upgrade goalU = upgradeManager.getSelectedGoal();
+				if (goalU != null)
+				{
+					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"Saving for " + goalU.getDisplayName()
+							+ ". Make sure the Bank Incinerator is enabled, then drag coins onto it to make progress.", null);
+				}
+				else
+				{
+					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"Bank open. You may redeem your pending one-shot passes.", null);
+				}
+			}
+
 			if (upgradeManager.isBankingUnlocked())
 			{
-				return; // banking unlocked: bank acts normally
+				return; // banking unlocked: bank acts normally (saving session still tracks coins)
 			}
-			// Saving mode: allow main bank widget (group 12) for incineration only.
-			// Deposit boxes (192) have no incinerator, so always block when banking is locked.
-			if (upgradeManager.getSelectedGoal() != null && g == 12)
+			// Banking locked: allow the main bank when actively saving for a goal OR when
+			// a one-shot deposit/withdrawal pass is pending. Deposit boxes (192) have no
+			// incinerator, so always block when banking is locked.
+			if (g == 12 && (upgradeManager.getSelectedGoal() != null || anyBankPass))
 			{
-				if (!savingBankOpen)
-				{
-					savingBankOpen = true;
-					startSavingSession();
-					final Upgrade goal = upgradeManager.getSelectedGoal();
-					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-						"Saving for " + goal.getDisplayName()
-							+ ". Make sure the Bank Incinerator is enabled, then deposit fresh coins and drag them onto the Incinerator.", null);
-					if (lastBankCoins > 0)
-					{
-						client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-							"NOTE: " + formatGp(lastBankCoins) + " already in bank are INELIGIBLE. Convert them to platinum tokens at a GE clerk or accept they cannot contribute.", null);
-					}
-					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-						"Coins remaining in bank when you close it become ineligible on reopen \u2014 incinerate fully before closing.", null);
-				}
 				return;
 			}
+
 			client.runScript(29);
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Banking is disabled.", null);
 			pendingBoop = true;
@@ -370,12 +393,28 @@ public class UltimateNormiePlugin extends Plugin
 		}
 
 		// GE offer screen
-		if (g == 465 && !upgradeManager.isGeUnlocked())
+		if (g == 465)
 		{
-			client.runScript(29);
-			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Grand Exchange is disabled.", null);
-			pendingBoop = true;
-			return;
+			if (upgradeManager.isActive(Upgrade.GE_USE))
+			{
+				// Permanent GE Use upgrade active — allow normally.
+			}
+			else if (upgradeManager.hasTemporaryGeSession())
+			{
+				// Already inside a temporary session from a GE pass.
+			}
+			else if (upgradeManager.consumeGePassCharge())
+			{
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"GE Pass consumed. GE access will be revoked when you close the Grand Exchange.", null);
+			}
+			else
+			{
+				client.runScript(29);
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "Grand Exchange is disabled.", null);
+				pendingBoop = true;
+				return;
+			}
 		}
 
 		// Trade screens
@@ -412,10 +451,24 @@ public class UltimateNormiePlugin extends Plugin
 			tradePassedFirstScreen = false;
 		}
 
-		// If the player cleared their goal mid-session, force-close the bank cleanly.
+		// Detect GE interface fully closed and revoke any temporary GE session.
+		// Both group 383 (main GE window) and 465 (offer sub-screen) must be gone.
+		if (upgradeManager.hasTemporaryGeSession() && !upgradeManager.isActive(Upgrade.GE_USE)
+			&& client.getWidget(383, 0) == null && client.getWidget(465, 0) == null)
+		{
+			upgradeManager.revokeTemporaryGe();
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+				"Grand Exchange closed. GE access revoked.", null);
+		}
+
+		// If the player cleared their goal mid-session (and no consumable charges remain),
+		// force-close the bank cleanly.
+		final boolean anyPendingCharge = upgradeManager.getConsumableCharges(Upgrade.DEPOSIT_PASS) > 0
+			|| upgradeManager.getConsumableCharges(Upgrade.WITHDRAWAL_PASS) > 0;
 		if (savingBankOpen
 			&& !upgradeManager.isBankingUnlocked()
 			&& upgradeManager.getSelectedGoal() == null
+			&& !anyPendingCharge
 			&& client.getWidget(12, 0) != null)
 		{
 			client.runScript(29);
@@ -424,19 +477,11 @@ public class UltimateNormiePlugin extends Plugin
 			resetSavingSession();
 		}
 
-		// Detect bank-close while saving. Any eligible coins remaining become pre-existing
-		// (and therefore ineligible) on the next bank open. We just inform the player.
+		// Detect bank-close while saving. With the simplified model nothing punitive
+		// happens \u2014 we just stop tracking until the bank is reopened.
 		if (savingBankOpen && client.getWidget(12, 0) == null)
 		{
-			final long strandedEligible = eligibleBankCoins;
 			resetSavingSession();
-			if (strandedEligible > 0)
-			{
-				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-					"Bank closed with " + formatGp(strandedEligible)
-						+ " eligible coins inside. They are now ineligible \u2014 only coins deposited in a new session can count.", null);
-				pendingBoop = true;
-			}
 		}
 	}
 
@@ -469,15 +514,13 @@ public class UltimateNormiePlugin extends Plugin
 		{
 			return;
 		}
-		final boolean hadAnything = upgradeManager.getActiveCount() > 0
-			|| upgradeManager.getSelectedGoal() != null;
+		// Check if Purgatory has items before wipe (to show message after death)
+		pendingPurgatoryWipeMessage = !upgradeManager.getPurgatory().isEmpty();
+		// Check if UNM bank has items before wipe (to show message after death)
+		pendingUnmBankToPurgatoryMessage = !upgradeManager.getUnmBank().isEmpty();
 		upgradeManager.hardWipe();
 		resetSavingSession();
-		if (hadAnything)
-		{
-			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-				"You died! All Upgrade Mode progress and active upgrades have been wiped.", null);
-		}
+		pendingDeathWipeMessage = true;
 	}
 
 	@Subscribe
@@ -506,6 +549,8 @@ public class UltimateNormiePlugin extends Plugin
 		}
 
 		// Banking interactions.
+		final boolean hasBankPasses = upgradeManager.getConsumableCharges(Upgrade.DEPOSIT_PASS) > 0
+			|| upgradeManager.getConsumableCharges(Upgrade.WITHDRAWAL_PASS) > 0;
 		if (isBankInteraction(option, target))
 		{
 			if (banking)
@@ -515,6 +560,11 @@ public class UltimateNormiePlugin extends Plugin
 			else if (goal != null && !target.contains("deposit box"))
 			{
 				// Saving mode: allow opening main bank for incineration. In-bank ops filtered below.
+			}
+			else if (hasBankPasses && !target.contains("deposit box"))
+			{
+				// One-shot bank pass(es) pending: let the player open the main bank to redeem.
+				// In-bank ops filtered below.
 			}
 			else
 			{
@@ -535,10 +585,13 @@ public class UltimateNormiePlugin extends Plugin
 				pendingBoop = true;
 				return;
 			}
+			// Note: the bare "grand exchange" substring used to be checked here too, but it
+			// false-fires on Spirit Tree teleports whose menu target/option contains "Grand
+			// Exchange" as a destination name. The clerk/booth/banker checks below already
+			// cover the real GE NPCs and objects.
 			final boolean targetIsGeOrBanker = target.contains("banker")
 				|| target.contains("bank chest")
 				|| target.contains("bank booth")
-				|| target.contains("grand exchange")
 				|| target.contains("exchange clerk")
 				|| target.contains("exchange booth");
 			if (targetIsGeOrBanker
@@ -551,21 +604,104 @@ public class UltimateNormiePlugin extends Plugin
 			}
 		}
 
-		// While saving (bank widget 12 open): only coin operations are allowed.
-		if (!banking && goal != null && client.getWidget(12, 0) != null)
+		// In-bank operations while banking is locked. Only coin ops (and incineration of
+		// coins) are normally allowed; one-shot deposit/withdrawal passes can be redeemed
+		// here to allow a single non-coin deposit or withdrawal action.
+		if (!banking && (goal != null || hasBankPasses) && client.getWidget(12, 0) != null)
 		{
 			final boolean isCoins = target.contains("coins");
 			final boolean isWithdraw = option.startsWith("withdraw");
 			final boolean isDeposit = option.startsWith("deposit");
 			final boolean isDestroy = option.equals("destroy");
-			if ((isWithdraw || isDeposit || isDestroy) && !isCoins)
+
+			if (isDeposit && !isCoins)
+			{
+				final boolean hasDepositPass = upgradeManager.getConsumableCharges(Upgrade.DEPOSIT_PASS) > 0;
+				if (!hasDepositPass)
+				{
+					event.consume();
+					pendingBoop = true;
+					return;
+				}
+				// Only "deposit-1" is permitted when using a Deposit Pass.
+				if (!option.equals("deposit-1"))
+				{
+					event.consume();
+					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"Deposit Pass only allows depositing one item.", null);
+					pendingBoop = true;
+					return;
+				}
+				final int itemId = event.getItemId();
+				if (upgradeManager.consumeCharge(Upgrade.DEPOSIT_PASS))
+				{
+					// Add the item to the UNMbank for later withdrawal.
+					if (itemId > 0)
+					{
+						upgradeManager.addToUnmBank(itemId, 1);
+						// Cache the item name for UI display (this is on the client thread).
+						final net.runelite.api.ItemComposition comp = itemManager.getItemComposition(itemId);
+						if (comp != null)
+						{
+							upgradeManager.setUnmBankItemName(itemId, comp.getName());
+						}
+					}
+					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"Deposit Pass consumed. Item added to UNM bank.", null);
+					return; // allow the deposit through
+				}
+				event.consume();
+				pendingBoop = true;
+				return;
+			}
+			if (isWithdraw && !isCoins)
+			{
+				final boolean hasWithdrawalPass = upgradeManager.getConsumableCharges(Upgrade.WITHDRAWAL_PASS) > 0;
+				if (!hasWithdrawalPass)
+				{
+					event.consume();
+					pendingBoop = true;
+					return;
+				}
+				// Only "withdraw-1" is permitted when using a Withdrawal Pass.
+				if (!option.equals("withdraw-1"))
+				{
+					event.consume();
+					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"Withdrawal Pass only allows withdrawing one item.", null);
+					pendingBoop = true;
+					return;
+				}
+				final int itemId = event.getItemId();
+				// Check if the item exists in the UNM bank.
+				if (!upgradeManager.hasInUnmBank(itemId))
+				{
+					event.consume();
+					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"Item not in UNM bank. You can only withdraw items deposited via Deposit Pass.", null);
+					pendingBoop = true;
+					return;
+				}
+				if (upgradeManager.consumeCharge(Upgrade.WITHDRAWAL_PASS))
+				{
+					// Remove the item from the UNM bank.
+					if (itemId > 0)
+					{
+						upgradeManager.removeFromUnmBank(itemId, 1);
+					}
+					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+						"Withdrawal Pass consumed. Item removed from UNM bank.", null);
+					return; // allow the withdraw through
+				}
+				event.consume();
+				pendingBoop = true;
+				return;
+			}
+			if (isDestroy && !isCoins)
 			{
 				event.consume();
-				if (isDestroy)
-				{
-					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-						"Only coins may be incinerated while saving.", null);
-				}
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"Only coins may be incinerated while saving.", null);
 				pendingBoop = true;
 				return;
 			}
@@ -916,6 +1052,34 @@ public class UltimateNormiePlugin extends Plugin
 	@Subscribe
 	public void onChatMessage(ChatMessage event)
 	{
+		// Print wipe message immediately after "Oh dear, you are dead!" fires.
+		// The death message can arrive as GAMEMESSAGE or SPAM depending on game state.
+		if (pendingDeathWipeMessage
+			&& (event.getType() == ChatMessageType.GAMEMESSAGE
+				|| event.getType() == ChatMessageType.SPAM)
+			&& event.getMessage().toLowerCase().contains("oh dear, you are dead"))
+		{
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+				"All UNM progress and active upgrades have been wiped.", null);
+			// Only show Purgatory message if UNM bank had items (checked before hardWipe)
+			if (pendingUnmBankToPurgatoryMessage)
+			{
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"Your UNM bank has been sent to Purgatory.", null);
+			}
+			// Show Purgatory wipe message if Purgatory had items
+			if (pendingPurgatoryWipeMessage)
+			{
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+					"Your Purgatory items have been wiped and are no longer retrievable.", null);
+			}
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+				"Please enjoy one free GE Pass. Use it wisely.", null);
+			pendingDeathWipeMessage = false;
+			pendingPurgatoryWipeMessage = false;
+			pendingUnmBankToPurgatoryMessage = false;
+		}
+
 		if (skullModIconIndex < 0)
 		{
 			return;
@@ -987,18 +1151,19 @@ public class UltimateNormiePlugin extends Plugin
 	}
 
 	/**
-	 * Renders a 12x12 skull icon scaled by the number of active upgrades:
-	 *   0      -> base white skull
-	 *   1-2    -> colored (red) skull
-	 *   3-4    -> colored skull with horns
-	 *   5+     -> gilded (gold-trim, red-eye) horned skull
+	 * Renders a 12x12 skull icon. One distinct visual per active upgrade (0..7):
+	 *   0 white | 1 yellow | 2 orange | 3 red | 4 red+horns | 5 red+horns+gold-trim |
+	 *   6 black | 7 black+horns+red-eyes
 	 */
 	private IndexedSprite createSkullIndexedSprite()
 	{
-		final int active = upgradeManager.getActiveCount();
-		final boolean horned = active >= 3;
-		final boolean gilded = active >= 5;
-		final int fillColor = active == 0 ? 0xFFFFFF : 0xFF0000;
+		final int unlocked = upgradeManager.getUnlockedCount();
+		final int tier = Math.max(0, Math.min(unlocked, 7));
+		final boolean horned = (tier == 4) || (tier == 5) || (tier == 7);
+		final boolean gilded = tier == 5;
+		final boolean blackTheme = tier >= 6;
+		final boolean redEyes = tier == 7;
+		final int fillColor = pickSkullFillColor(tier);
 
 		final int w = 12;
 		final int h = 12;
@@ -1009,8 +1174,10 @@ public class UltimateNormiePlugin extends Plugin
 		final int RED  = 0xFFFF0000;
 		final int OUTLINE = gilded ? GOLD : 0xFF000000;
 		final int FILL    = 0xFF000000 | fillColor;
-		final int DETAIL  = gilded ? GOLD : 0xFF000000;
-		final int EYES    = gilded ? RED : DETAIL;
+		// Black-themed skulls need contrasting (white) interior detail so the eye sockets
+		// and teeth are visible against the black fill; everything else keeps black detail.
+		final int DETAIL  = gilded ? GOLD : (blackTheme ? 0xFFFFFFFF : 0xFF000000);
+		final int EYES    = redEyes ? RED : DETAIL;
 
 		if (horned)
 		{
@@ -1035,9 +1202,6 @@ public class UltimateNormiePlugin extends Plugin
 			fill(argb, w, 3, 5, 2, 2, EYES);
 			fill(argb, w, 7, 5, 2, 2, EYES);
 			fill(argb, w, 5, 7, 2, 1, DETAIL);
-
-			fill(argb, w, 4, 9, 1, 1, DETAIL);
-			fill(argb, w, 6, 9, 1, 1, DETAIL);
 		}
 		else
 		{
@@ -1054,25 +1218,27 @@ public class UltimateNormiePlugin extends Plugin
 			fill(argb, w, 3, 4, 2, 2, DETAIL);
 			fill(argb, w, 7, 4, 2, 2, DETAIL);
 			fill(argb, w, 5, 6, 2, 1, DETAIL);
-
-			fill(argb, w, 4, 9, 1, 1, DETAIL);
-			fill(argb, w, 6, 9, 1, 1, DETAIL);
 		}
 
+		// Build the palette keyed on the full ARGB value so opaque black (0xFF000000)
+		// does NOT collide with the reserved transparent slot at palette index 0. The
+		// previous (RGB-only) keying mapped any pure-black pixel to the transparent
+		// index, which made the whole tier-6/7 black skull render as an empty sprite
+		// (and partial breakage on lower tiers' black outlines/details).
 		final java.util.LinkedHashMap<Integer, Byte> paletteMap = new java.util.LinkedHashMap<>();
-		paletteMap.put(0, (byte) 0); // transparent
+		paletteMap.put(0, (byte) 0); // ARGB=0 -> palette index 0 = transparent
 		for (int c : argb)
 		{
-			if ((c >>> 24) != 0 && !paletteMap.containsKey(c & 0x00FFFFFF))
+			if (!paletteMap.containsKey(c))
 			{
-				paletteMap.put(c & 0x00FFFFFF, (byte) paletteMap.size());
+				paletteMap.put(c, (byte) paletteMap.size());
 			}
 		}
 		final int[] palette = new int[paletteMap.size()];
 		int idx = 0;
 		for (int key : paletteMap.keySet())
 		{
-			palette[idx++] = key;
+			palette[idx++] = key & 0x00FFFFFF; // palette stores RGB only; alpha lives in the index
 		}
 
 		final IndexedSprite sprite = client.createIndexedSprite();
@@ -1087,19 +1253,24 @@ public class UltimateNormiePlugin extends Plugin
 		final byte[] pixels = new byte[w * h];
 		for (int i = 0; i < argb.length; i++)
 		{
-			final int c = argb[i];
-			if ((c >>> 24) == 0)
-			{
-				pixels[i] = 0;
-			}
-			else
-			{
-				final Byte pi = paletteMap.get(c & 0x00FFFFFF);
-				pixels[i] = pi != null ? pi : 0;
-			}
+			final Byte pi = paletteMap.get(argb[i]);
+			pixels[i] = pi != null ? pi : 0;
 		}
 		sprite.setPixels(pixels);
 		return sprite;
+	}
+
+	static int pickSkullFillColor(int tier)
+	{
+		switch (tier)
+		{
+			case 0: return 0xFFFFFF; // white
+			case 1: return 0xFFEE66; // yellow
+			case 2: return 0xFF9933; // orange
+			case 6:
+			case 7: return 0x000000; // black
+			default: return 0xCC0000; // red (3-5)
+		}
 	}
 
 	private static void fill(int[] argb, int w, int x, int y, int rw, int rh, int color)

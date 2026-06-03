@@ -5,9 +5,12 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -29,11 +32,13 @@ import net.runelite.client.ui.PluginPanel;
  */
 public class UpgradePanel extends PluginPanel
 {
-	private static final Color ACTIVE_GREEN = new Color(80, 180, 80);
-	private static final Color GOAL_BLUE    = new Color(80, 130, 200);
-	private static final Color LOCKED_GRAY  = new Color(110, 110, 110);
+	private static final Color ACTIVE_GREEN  = new Color(80, 180, 80);
+	private static final Color INACTIVE_RED  = new Color(200, 80, 80);
+	private static final Color GOAL_BLUE     = new Color(80, 130, 200);
+	private static final Color LOCKED_GRAY   = new Color(110, 110, 110);
 
 	private final UpgradeManager mgr;
+	private boolean rulesCollapsed = false;
 
 	public UpgradePanel(UpgradeManager mgr)
 	{
@@ -52,36 +57,64 @@ public class UpgradePanel extends PluginPanel
 			return;
 		}
 
-		removeAll();
+		try
+		{
+			removeAll();
 
-		final JLabel header = new JLabel("UNM Upgrades");
-		header.setFont(FontManager.getRunescapeBoldFont());
-		header.setForeground(Color.WHITE);
-		header.setBorder(BorderFactory.createEmptyBorder(8, 8, 4, 8));
-		add(header, BorderLayout.NORTH);
+			final JLabel header = new JLabel("UNM Upgrades");
+			header.setFont(FontManager.getRunescapeBoldFont());
+			header.setForeground(Color.WHITE);
+			header.setBorder(BorderFactory.createEmptyBorder(8, 8, 4, 8));
+			add(header, BorderLayout.NORTH);
 
-		final JPanel body = new JPanel();
-		body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
-		body.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		body.setBorder(BorderFactory.createEmptyBorder(0, 8, 8, 8));
+			final JPanel body = new JPanel();
+			body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+			body.setBackground(ColorScheme.DARK_GRAY_COLOR);
+			body.setBorder(BorderFactory.createEmptyBorder(0, 8, 8, 8));
 
-		body.add(buildActiveSection());
-		body.add(Box.createVerticalStrut(8));
-		body.add(separator());
-		body.add(Box.createVerticalStrut(8));
-		body.add(buildGoalSection());
-		body.add(Box.createVerticalStrut(8));
-		body.add(separator());
-		body.add(Box.createVerticalStrut(8));
-		body.add(buildAvailableSection());
-		body.add(Box.createVerticalStrut(8));
-		body.add(separator());
-		body.add(Box.createVerticalStrut(8));
-		body.add(buildRulesSection());
+			body.add(buildRulesSection());
+			body.add(Box.createVerticalStrut(8));
+			body.add(separator());
+			body.add(Box.createVerticalStrut(8));
+			body.add(buildActiveSection());
+			body.add(Box.createVerticalStrut(8));
+			body.add(separator());
+			body.add(Box.createVerticalStrut(8));
+			body.add(buildConsumablesSection());
+			body.add(Box.createVerticalStrut(8));
+			body.add(separator());
+			body.add(Box.createVerticalStrut(8));
+			body.add(buildUnmBankSection());
+			body.add(Box.createVerticalStrut(8));
+			body.add(separator());
+			body.add(Box.createVerticalStrut(8));
+			body.add(buildPurgatorySection());
+			body.add(Box.createVerticalStrut(8));
+			body.add(separator());
+			body.add(Box.createVerticalStrut(8));
+			body.add(buildGoalSection());
+			body.add(Box.createVerticalStrut(8));
+			body.add(separator());
+			body.add(Box.createVerticalStrut(8));
+			body.add(buildAvailableSection());
+			body.add(Box.createVerticalStrut(8));
+			body.add(separator());
+			body.add(Box.createVerticalStrut(8));
 
-		add(body, BorderLayout.CENTER);
-		revalidate();
-		repaint();
+			add(body, BorderLayout.CENTER);
+			revalidate();
+			repaint();
+		}
+		catch (Exception e)
+		{
+			removeAll();
+			final JLabel error = new JLabel("Error: " + e.getMessage());
+			error.setForeground(Color.RED);
+			add(error, BorderLayout.CENTER);
+			revalidate();
+			repaint();
+			e.printStackTrace();
+		}
 	}
 
 	private JSeparator separator()
@@ -94,25 +127,191 @@ public class UpgradePanel extends PluginPanel
 
 	private JPanel buildActiveSection()
 	{
-		final JPanel sec = section("Active Upgrades (this life)");
-		if (mgr.getActiveUpgrades().isEmpty())
+		final JPanel sec = section("Unlocked Upgrades (this life)");
+		if (mgr.getUnlockedUpgrades().isEmpty())
 		{
 			sec.add(dim("(none \u2014 strict mode)"));
+			return sec;
+		}
+		for (Upgrade u : Upgrade.values())
+		{
+			if (u.isConsumable() || !mgr.isUnlocked(u))
+			{
+				continue;
+			}
+			sec.add(buildUnlockedRow(u));
+			sec.add(Box.createVerticalStrut(2));
+		}
+		return sec;
+	}
+
+	private JPanel buildConsumablesSection()
+	{
+		final JPanel sec = section("Consumables (this life)");
+
+		// GE Pass charge count
+		sec.add(buildChargeRow("GE Pass",
+			mgr.getConsumableCharges(Upgrade.GE_PASS),
+			mgr.hasTemporaryGeSession() ? " (Active)" : null));
+		sec.add(Box.createVerticalStrut(2));
+
+		// Bank-pass charge counts (informational)
+		sec.add(buildChargeRow("Deposit Pass", mgr.getConsumableCharges(Upgrade.DEPOSIT_PASS), null));
+		sec.add(Box.createVerticalStrut(2));
+		sec.add(buildChargeRow("Withdrawal Pass", mgr.getConsumableCharges(Upgrade.WITHDRAWAL_PASS), null));
+		return sec;
+	}
+
+	private JPanel buildUnmBankSection()
+	{
+		final JPanel sec = section("UNM Bank (Deposit/Withdrawal Pass)");
+		try
+		{
+			final Map<Integer, Integer> unmBank = mgr.getUnmBank();
+			if (unmBank.isEmpty())
+			{
+				sec.add(dim("(empty)"));
+				return sec;
+			}
+			// Sort by item ID for consistent ordering.
+			final List<Entry<Integer, Integer>> entries = new ArrayList<>(unmBank.entrySet());
+			entries.sort(Comparator.comparingInt(Entry::getKey));
+			for (Entry<Integer, Integer> entry : entries)
+			{
+				final int itemId = entry.getKey();
+				final int qty = entry.getValue();
+				// Use cached item name (populated on client thread during deposit).
+				// Fall back to item ID if not cached (e.g., items deposited before this change).
+				final String itemName = mgr.getUnmBankItemName(itemId);
+				final String displayName = (itemName != null) ? itemName : "Item ID: " + itemId;
+				final JPanel row = new JPanel(new BorderLayout(6, 0));
+				row.setBackground(ColorScheme.DARK_GRAY_COLOR);
+				row.setAlignmentX(Component.LEFT_ALIGNMENT);
+				row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+				final JLabel name = new JLabel("\u2022 " + displayName);
+				name.setForeground(ACTIVE_GREEN);
+				row.add(name, BorderLayout.CENTER);
+				final JLabel count = new JLabel("x" + qty);
+				count.setForeground(ACTIVE_GREEN);
+				count.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
+				count.setPreferredSize(new Dimension(72, 22));
+				row.add(count, BorderLayout.EAST);
+				sec.add(row);
+				sec.add(Box.createVerticalStrut(2));
+			}
+		}
+		catch (Exception e)
+		{
+			sec.add(dim("(error loading unm-bank)"));
+		}
+		return sec;
+	}
+
+	private JPanel buildPurgatorySection()
+	{
+		final JPanel sec = section("Purgatory");
+		try
+		{
+			final Map<Integer, Integer> purgatory = mgr.getPurgatory();
+			if (purgatory.isEmpty())
+			{
+				sec.add(dim("(empty)"));
+				return sec;
+			}
+			// Show unlock cost
+			final long unlockCost = mgr.getPurgatoryUnlockCost();
+			final JLabel costLabel = new JLabel("Unlock cost: " + formatGp(unlockCost));
+			costLabel.setForeground(Color.LIGHT_GRAY);
+			costLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+			sec.add(costLabel);
+			sec.add(Box.createVerticalStrut(4));
+
+			// Sort by item ID for consistent ordering.
+			final List<Entry<Integer, Integer>> entries = new ArrayList<>(purgatory.entrySet());
+			entries.sort(Comparator.comparingInt(Entry::getKey));
+			for (Entry<Integer, Integer> entry : entries)
+			{
+				final int itemId = entry.getKey();
+				final int qty = entry.getValue();
+				// Use cached item name (populated on client thread during deposit).
+				// Fall back to item ID if not cached.
+				final String itemName = mgr.getPurgatoryItemName(itemId);
+				final String displayName = (itemName != null) ? itemName : "Item ID: " + itemId;
+				final JPanel row = new JPanel(new BorderLayout(6, 0));
+				row.setBackground(ColorScheme.DARK_GRAY_COLOR);
+				row.setAlignmentX(Component.LEFT_ALIGNMENT);
+				row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+				final JLabel name = new JLabel("\u2022 " + displayName);
+				name.setForeground(LOCKED_GRAY);
+				row.add(name, BorderLayout.CENTER);
+				final JLabel count = new JLabel("x" + qty);
+				count.setForeground(LOCKED_GRAY);
+				count.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
+				count.setPreferredSize(new Dimension(72, 22));
+				row.add(count, BorderLayout.EAST);
+				sec.add(row);
+				sec.add(Box.createVerticalStrut(2));
+			}
+		}
+		catch (Exception e)
+		{
+			sec.add(dim("(error loading purgatory)"));
+		}
+		return sec;
+	}
+
+	private JPanel buildChargeRow(String label, int charges, String suffix)
+	{
+		final JPanel row = new JPanel(new BorderLayout(6, 0));
+		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+		final boolean active = charges > 0 || suffix != null;
+		final String nameText = "\u2022 " + label + (suffix != null ? suffix : "");
+		final JLabel name = new JLabel(nameText);
+		name.setForeground(active ? ACTIVE_GREEN : LOCKED_GRAY);
+		row.add(name, BorderLayout.CENTER);
+		final JLabel count = new JLabel("x" + charges);
+		count.setForeground(active ? ACTIVE_GREEN : LOCKED_GRAY);
+		count.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
+		count.setPreferredSize(new Dimension(72, 22));
+		row.add(count, BorderLayout.EAST);
+		return row;
+	}
+
+	private JPanel buildUnlockedRow(Upgrade u)
+	{
+		final boolean active = mgr.isActive(u);
+		final JPanel row = new JPanel(new BorderLayout(6, 0));
+		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+
+		final JLabel name = new JLabel("\u2022 " + u.getDisplayName());
+		name.setForeground(active ? ACTIVE_GREEN : INACTIVE_RED);
+		row.add(name, BorderLayout.CENTER);
+
+		final JButton btn = makeStatusButton(active);
+		if (u.isToggleable())
+		{
+			btn.addActionListener(e -> mgr.setActive(u, !active));
 		}
 		else
 		{
-			for (Upgrade u : Upgrade.values())
-			{
-				if (mgr.isActive(u))
-				{
-					final JLabel l = new JLabel("\u2022 " + u.getDisplayName());
-					l.setForeground(ACTIVE_GREEN);
-					l.setAlignmentX(Component.LEFT_ALIGNMENT);
-					sec.add(l);
-				}
-			}
+			btn.setEnabled(false);
 		}
-		return sec;
+		row.add(btn, BorderLayout.EAST);
+		return row;
+	}
+
+	/** Standardised Active/Inactive button matching the Available Upgrades row buttons. */
+	private JButton makeStatusButton(boolean active)
+	{
+		final JButton btn = new JButton(active ? "Active" : "Inactive");
+		btn.setFocusPainted(false);
+		btn.setPreferredSize(new Dimension(72, 24));
+		btn.setForeground(active ? ACTIVE_GREEN : INACTIVE_RED);
+		return btn;
 	}
 
 	private JPanel buildGoalSection()
@@ -133,7 +332,7 @@ public class UpgradePanel extends PluginPanel
 		sec.add(Box.createVerticalStrut(2));
 
 		final long progress = mgr.getProgress(goal);
-		final long cost = goal.getCost();
+		final long cost = mgr.getCurrentCost(goal);
 		final int pct = (int) Math.min(100, (progress * 100L) / Math.max(1L, cost));
 
 		final JLabel detail = new JLabel(formatGp(progress) + " / " + formatGp(cost) + "  (" + pct + "%)");
@@ -161,9 +360,8 @@ public class UpgradePanel extends PluginPanel
 
 		sec.add(Box.createVerticalStrut(2));
 		final JLabel hint = new JLabel(
-			"<html><body style='width:170px'>"
-				+ "Open a bank, deposit fresh coins, then drag them onto the Incinerator.<br><br>"
-				+ "<b>See \"How saving works\" below for full rules.</b>"
+			"<html><body style='width:150px'>"
+				+ "Open a bank and drag coins onto the Bank Incinerator to make progress."
 				+ "</body></html>");
 		hint.setForeground(Color.GRAY);
 		hint.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -175,16 +373,40 @@ public class UpgradePanel extends PluginPanel
 	private JPanel buildRulesSection()
 	{
 		final JPanel sec = section("How saving works");
-		final JLabel rules = new JLabel(
-			"<html><body style='width:170px'>"
-				+ "\u2022 <b>Enable Bank Incinerator</b> first (Bank \u2192 settings \u2192 Incinerator).<br>"
-				+ "\u2022 <b>Only coins deposited during the current bank session count.</b> Coins already in the bank are <span style='color:#cc7777'>ineligible</span> \u2014 convert them to platinum tokens at a GE clerk if you want to keep them off the bank.<br>"
-				+ "\u2022 <b>Closing the bank with eligible coins still inside makes them ineligible on reopen.</b> Always incinerate fully before closing.<br>"
-				+ "\u2022 <b>Dying wipes ALL progress and active upgrades.</b>"
-				+ "</body></html>");
-		rules.setForeground(Color.LIGHT_GRAY);
-		rules.setAlignmentX(Component.LEFT_ALIGNMENT);
-		sec.add(rules);
+
+		// Replace the header with a clickable toggle version
+		final JLabel header = new JLabel((rulesCollapsed ? "\u25B6 " : "\u25BC ") + "How saving works");
+		header.setForeground(Color.WHITE);
+		header.setFont(FontManager.getRunescapeBoldFont());
+		header.setAlignmentX(Component.LEFT_ALIGNMENT);
+		header.addMouseListener(new java.awt.event.MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(java.awt.event.MouseEvent e)
+			{
+				rulesCollapsed = !rulesCollapsed;
+				rebuild();
+			}
+		});
+		sec.removeAll();
+		sec.add(header);
+		sec.add(Box.createVerticalStrut(4));
+
+		// Content (only shown if not collapsed)
+		if (!rulesCollapsed)
+		{
+			final JLabel rules = new JLabel(
+				"<html>"
+					+ "\u2022 <b>Enable the Bank Incinerator</b> in the bank's settings.<br>"
+					+ "\u2022 Pick a goal, then drag coins onto the Incinerator. Every coin destroyed counts.<br>"
+					+ "\u2022 Gateway upgrades (Banking / GE / Trade) can be toggled <b style='color:#50b450'>Active</b> / <b style='color:#c85050'>Inactive</b> at any time.<br>"
+					+ "\u2022 <b>Dying wipes ALL progress and unlocks.</b>"
+					+ "</html>");
+			rules.setForeground(Color.LIGHT_GRAY);
+			rules.setAlignmentX(Component.LEFT_ALIGNMENT);
+			sec.add(rules);
+		}
+
 		return sec;
 	}
 
@@ -246,7 +468,10 @@ public class UpgradePanel extends PluginPanel
 		name.setAlignmentX(Component.LEFT_ALIGNMENT);
 		left.add(name);
 
-		final JLabel cost = new JLabel(formatGp(u.getCost()));
+		final String costText = u.isConsumable()
+			? formatGp(mgr.getCurrentCost(u)) + "  (+1K next)"
+			: formatGp(u.getCost());
+		final JLabel cost = new JLabel(costText);
 		cost.setForeground(Color.LIGHT_GRAY);
 		cost.setAlignmentX(Component.LEFT_ALIGNMENT);
 		left.add(cost);
@@ -268,10 +493,17 @@ public class UpgradePanel extends PluginPanel
 		final boolean isGoal = mgr.getSelectedGoal() == u;
 		final boolean canSelect = mgr.canSelectAsGoal(u);
 
-		if (active)
+		if (active && !u.isConsumable())
 		{
 			btn.setText("Active");
 			btn.setForeground(ACTIVE_GREEN);
+			btn.setEnabled(false);
+		}
+		else if (!u.isConsumable() && mgr.isUnlocked(u))
+		{
+			// Owned but currently toggled off (only possible for gateway upgrades).
+			btn.setText("Inactive");
+			btn.setForeground(INACTIVE_RED);
 			btn.setEnabled(false);
 		}
 		else if (isGoal)
@@ -288,7 +520,7 @@ public class UpgradePanel extends PluginPanel
 		}
 		else
 		{
-			btn.setText("Set");
+			btn.setText(u.isConsumable() ? "Buy" : "Set");
 			btn.addActionListener(e -> mgr.selectGoal(u));
 		}
 		return btn;

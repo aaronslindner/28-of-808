@@ -25,7 +25,7 @@ public class ChatPromptSkullOverlay extends Overlay
 	private final UpgradeManager upgradeManager;
 
 	private volatile BufferedImage skull;
-	private int builtForActiveCount = -1;
+	private int builtForUnlockedCount = -1;
 
 	@Inject
 	public ChatPromptSkullOverlay(Client client, UpgradeManager upgradeManager)
@@ -36,10 +36,10 @@ public class ChatPromptSkullOverlay extends Overlay
 		setLayer(OverlayLayer.UNDER_WIDGETS);
 	}
 
-	/** Call when the active-upgrade count changes so the next render rebuilds the image. */
+	/** Call when the unlocked-upgrade count changes so the next render rebuilds the image. */
 	public void invalidate()
 	{
-		builtForActiveCount = -1;
+		builtForUnlockedCount = -1;
 	}
 
 	@Override
@@ -57,11 +57,11 @@ public class ChatPromptSkullOverlay extends Overlay
 			return null;
 		}
 
-		final int active = upgradeManager.getActiveCount();
-		if (skull == null || builtForActiveCount != active)
+		final int unlocked = upgradeManager.getUnlockedCount();
+		if (skull == null || builtForUnlockedCount != unlocked)
 		{
-			skull = buildSkull(active);
-			builtForActiveCount = active;
+			skull = buildSkull(unlocked);
+			builtForUnlockedCount = unlocked;
 		}
 
 		final int x = b.x - ICON_SIZE + 2;
@@ -78,25 +78,24 @@ public class ChatPromptSkullOverlay extends Overlay
 
 	/**
 	 * Builds the 12x12 skull bitmap. Mirrors the IndexedSprite drawn for the chat-name
-	 * prefix in {@link UltimateNormiePlugin#createSkullIndexedSprite}.
-	 *
-	 *   0   active -> white base skull
-	 *   1-2 active -> red colored skull
-	 *   3-4 active -> red horned skull
-	 *   5+  active -> gilded horned skull
+	 * prefix in {@link UltimateNormiePlugin#createSkullIndexedSprite}. One distinct
+	 * visual per active upgrade (0..7).
 	 */
 	static BufferedImage buildSkull(int active)
 	{
-		final boolean horned = active >= 3;
-		final boolean gilded = active >= 5;
-		final int fill = active == 0 ? 0xFFFFFF : 0xFF0000;
+		final int tier = Math.max(0, Math.min(active, 7));
+		final boolean horned = (tier == 4) || (tier == 5) || (tier == 7);
+		final boolean gilded = tier == 5;
+		final boolean blackTheme = tier >= 6;
+		final boolean redEyes = tier == 7;
+		final int fill = UltimateNormiePlugin.pickSkullFillColor(tier);
 
 		final int GOLD = 0xFFFFD700;
 		final int RED  = 0xFFFF0000;
 		final int OUTLINE = gilded ? GOLD : 0xFF000000;
 		final int FILL    = 0xFF000000 | fill;
-		final int DETAIL  = gilded ? GOLD : 0xFF000000;
-		final int EYES    = gilded ? RED : DETAIL;
+		final int DETAIL  = gilded ? GOLD : (blackTheme ? 0xFFFFFFFF : 0xFF000000);
+		final int EYES    = redEyes ? RED : DETAIL;
 
 		final int w = ICON_SIZE;
 		final int h = ICON_SIZE;
@@ -125,9 +124,6 @@ public class ChatPromptSkullOverlay extends Overlay
 			fillRect(img, 3, 5, 2, 2, EYES);
 			fillRect(img, 7, 5, 2, 2, EYES);
 			fillRect(img, 5, 7, 2, 1, DETAIL);
-
-			fillRect(img, 4, 9, 1, 1, DETAIL);
-			fillRect(img, 6, 9, 1, 1, DETAIL);
 		}
 		else
 		{
@@ -144,9 +140,6 @@ public class ChatPromptSkullOverlay extends Overlay
 			fillRect(img, 3, 4, 2, 2, DETAIL);
 			fillRect(img, 7, 4, 2, 2, DETAIL);
 			fillRect(img, 5, 6, 2, 1, DETAIL);
-
-			fillRect(img, 4, 9, 1, 1, DETAIL);
-			fillRect(img, 6, 9, 1, 1, DETAIL);
 		}
 		return img;
 	}
