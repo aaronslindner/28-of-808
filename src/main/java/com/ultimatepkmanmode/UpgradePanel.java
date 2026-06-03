@@ -20,6 +20,7 @@ import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.JSeparator;
 import javax.swing.SwingUtilities;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
@@ -30,6 +31,7 @@ import net.runelite.client.ui.PluginPanel;
  *   - Current saving goal + progress bar
  *   - Available upgrades grouped by category with [Set] / [Active] / [Locked] / [Goal] state
  */
+@Slf4j
 public class UpgradePanel extends PluginPanel
 {
 	private static final Color ACTIVE_GREEN  = new Color(80, 180, 80);
@@ -113,7 +115,7 @@ public class UpgradePanel extends PluginPanel
 			add(error, BorderLayout.CENTER);
 			revalidate();
 			repaint();
-			e.printStackTrace();
+			log.error("Error rebuilding UpgradePanel", e);
 		}
 	}
 
