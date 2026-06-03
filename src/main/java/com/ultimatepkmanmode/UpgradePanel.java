@@ -4,11 +4,14 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 import javax.swing.BorderFactory;
@@ -381,10 +384,10 @@ public class UpgradePanel extends PluginPanel
 		header.setForeground(Color.WHITE);
 		header.setFont(FontManager.getRunescapeBoldFont());
 		header.setAlignmentX(Component.LEFT_ALIGNMENT);
-		header.addMouseListener(new java.awt.event.MouseAdapter()
+		header.addMouseListener(new MouseAdapter()
 		{
 			@Override
-			public void mouseClicked(java.awt.event.MouseEvent e)
+			public void mouseClicked(MouseEvent e)
 			{
 				rulesCollapsed = !rulesCollapsed;
 				rebuild();
@@ -417,10 +420,10 @@ public class UpgradePanel extends PluginPanel
 		final JPanel sec = section("Available Upgrades");
 
 		// Group upgrades by category
-		final Map<Upgrade.Category, java.util.List<Upgrade>> byCat = new EnumMap<>(Upgrade.Category.class);
+		final Map<Upgrade.Category, List<Upgrade>> byCat = new EnumMap<>(Upgrade.Category.class);
 		for (Upgrade u : Upgrade.values())
 		{
-			byCat.computeIfAbsent(u.getCategory(), k -> new java.util.ArrayList<>()).add(u);
+			byCat.computeIfAbsent(u.getCategory(), k -> new ArrayList<>()).add(u);
 		}
 
 		boolean first = true;
@@ -585,7 +588,7 @@ public class UpgradePanel extends PluginPanel
 		{
 			return Long.toString(Math.round(v));
 		}
-		return String.format(java.util.Locale.US, v >= 10 ? "%.1f" : "%.2f", v).replaceAll("\\.?0+$", "");
+		return String.format(Locale.US, v >= 10 ? "%.1f" : "%.2f", v).replaceAll("\\.?0+$", "");
 	}
 
 	/** A small skull icon used as the navigation button. */

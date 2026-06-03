@@ -1,9 +1,11 @@
 package com.ultimatepkmanmode;
 
 import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -252,11 +254,11 @@ public class UltimateNormiePlugin extends Plugin
 		}
 		else if (value >= 10)
 		{
-			return new DecimalFormat("0.#", java.text.DecimalFormatSymbols.getInstance()).format(value);
+			return new DecimalFormat("0.#", DecimalFormatSymbols.getInstance()).format(value);
 		}
 		else
 		{
-			return new DecimalFormat("0.##", java.text.DecimalFormatSymbols.getInstance()).format(value);
+			return new DecimalFormat("0.##", DecimalFormatSymbols.getInstance()).format(value);
 		}
 	}
 
@@ -1225,7 +1227,7 @@ public class UltimateNormiePlugin extends Plugin
 		// previous (RGB-only) keying mapped any pure-black pixel to the transparent
 		// index, which made the whole tier-6/7 black skull render as an empty sprite
 		// (and partial breakage on lower tiers' black outlines/details).
-		final java.util.LinkedHashMap<Integer, Byte> paletteMap = new java.util.LinkedHashMap<>();
+		final LinkedHashMap<Integer, Byte> paletteMap = new LinkedHashMap<>();
 		paletteMap.put(0, (byte) 0); // ARGB=0 -> palette index 0 = transparent
 		for (int c : argb)
 		{
