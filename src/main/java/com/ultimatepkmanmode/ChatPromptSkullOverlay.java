@@ -84,10 +84,10 @@ public class ChatPromptSkullOverlay extends Overlay
 	static BufferedImage buildSkull(int active)
 	{
 		final int tier = Math.max(0, Math.min(active, 7));
-		final boolean horned = (tier == 4) || (tier == 5) || (tier == 7);
-		final boolean gilded = tier == 5;
+		final boolean horned = (tier == 7);
+		final boolean gilded = false;
 		final boolean blackTheme = tier >= 6;
-		final boolean redEyes = tier == 7;
+		final boolean redEyes = false;
 		final int fill = UltimateNormiePlugin.pickSkullFillColor(tier);
 
 		final int GOLD = 0xFFFFD700;

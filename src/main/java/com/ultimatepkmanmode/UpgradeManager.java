@@ -603,8 +603,9 @@ public class UpgradeManager
 	/** Returns the unlock cost for Purgatory (total spent on passes in prior life). */
 	public long getPurgatoryUnlockCost()
 	{
-		// If Purgatory has items, ensure minimum cost is 1 gp (OSRS doesn't allow 0 gp incineration)
-		return purgatory.isEmpty() ? 0L : Math.max(1L, purgatoryUnlockCost);
+		// Always enforce a 1 gp minimum (OSRS doesn't allow 0 gp incineration), even when
+		// Purgatory is empty, so the displayed unlock cost is never 0.
+		return Math.max(1L, purgatoryUnlockCost);
 	}
 
 	/** Unlocks Purgatory by moving all items back to UNM bank. Returns true if successful. */

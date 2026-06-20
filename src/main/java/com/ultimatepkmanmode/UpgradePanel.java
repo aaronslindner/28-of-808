@@ -218,18 +218,20 @@ public class UpgradePanel extends PluginPanel
 		try
 		{
 			final Map<Integer, Integer> purgatory = mgr.getPurgatory();
-			if (purgatory.isEmpty())
-			{
-				sec.add(dim("(empty)"));
-				return sec;
-			}
-			// Show unlock cost
+
+			// Show unlock cost (always enforces a 1 gp minimum, shown even when empty).
 			final long unlockCost = mgr.getPurgatoryUnlockCost();
 			final JLabel costLabel = new JLabel("Unlock cost: " + formatGp(unlockCost));
 			costLabel.setForeground(Color.LIGHT_GRAY);
 			costLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 			sec.add(costLabel);
 			sec.add(Box.createVerticalStrut(4));
+
+			if (purgatory.isEmpty())
+			{
+				sec.add(dim("(empty)"));
+				return sec;
+			}
 
 			// Sort by item ID for consistent ordering.
 			final List<Entry<Integer, Integer>> entries = new ArrayList<>(purgatory.entrySet());

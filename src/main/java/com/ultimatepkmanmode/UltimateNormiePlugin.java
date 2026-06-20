@@ -101,9 +101,6 @@ public class UltimateNormiePlugin extends Plugin
 	private TradeBalanceOverlay tradeBalanceOverlay;
 
 	@Inject
-	private WealthCalculator wealthCalculator;
-
-	@Inject
 	private UpgradeManager upgradeManager;
 
 	@Inject
@@ -296,6 +293,20 @@ public class UltimateNormiePlugin extends Plugin
 	{
 		final long bankNow = countCoinsIn(InventoryID.BANK);
 		final long invNow = countCoinsIn(InventoryID.INV);
+
+		// Only credit incineration when the bank window is genuinely open and the GE is
+		// not. GE coin movements (buy-offer escrow, collection) otherwise look identical
+		// to incineration — bank coins leave without landing in inventory — and would
+		// falsely advance the saving goal. In those cases just refresh the baseline.
+		final boolean bankReallyOpen = client.getWidget(12, 0) != null;
+		final boolean geOpen = client.getWidget(383, 0) != null || client.getWidget(465, 0) != null;
+		if (!bankReallyOpen || geOpen)
+		{
+			lastBankCoins = bankNow;
+			lastInvCoins = invNow;
+			return;
+		}
+
 		final long bankDelta = bankNow - lastBankCoins;
 		final long destroyed = (lastBankCoins + lastInvCoins) - (bankNow + invNow);
 
@@ -490,11 +501,6 @@ public class UltimateNormiePlugin extends Plugin
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
-		if (event.getContainerId() == InventoryID.LOOTING_BAG)
-		{
-			wealthCalculator.updateLootingBagCache();
-		}
-
 		if (savingBankOpen
 			&& (event.getContainerId() == InventoryID.BANK
 				|| event.getContainerId() == InventoryID.INV))
@@ -530,11 +536,6 @@ public class UltimateNormiePlugin extends Plugin
 	{
 		final String option = Text.standardize(event.getMenuOption());
 		final String target = Text.standardize(event.getMenuTarget());
-
-		if (option.equals("destroy") && target.contains("looting bag"))
-		{
-			wealthCalculator.clearLootingBagCache();
-		}
 
 		final boolean banking = upgradeManager.isBankingUnlocked();
 		final boolean geUnlocked = upgradeManager.isGeUnlocked();
@@ -606,16 +607,57 @@ public class UltimateNormiePlugin extends Plugin
 			}
 		}
 
+		// Always block "Collect to bank" from the GE collection box. Collecting directly
+		// to the bank bypasses the inventory, which would let coins reach the bank without
+		// passing through the incinerator. Force collection to inventory instead.
+		final boolean geCollectOpen = client.getWidget(402, 0) != null
+			|| client.getWidget(383, 0) != null
+			|| client.getWidget(465, 0) != null;
+		// TEMP DEBUG: log collect/bank-related clicks so we can confirm the exact strings.
+		if (option.contains("collect") || option.contains("bank") || target.contains("coins"))
+		{
+			log.debug("GE-collect debug: option='{}', target='{}', geCollectOpen={}, w402={}, w383={}, w465={}",
+				option, target, geCollectOpen,
+				client.getWidget(402, 0) != null,
+				client.getWidget(383, 0) != null,
+				client.getWidget(465, 0) != null);
+		}
+		if (geCollectOpen && (option.contains("collect to bank")
+			|| option.equals("bank-all")
+			|| option.equals("bank")
+			|| option.contains("bank")))
+		{
+			event.consume();
+			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+				"Banking is disabled.", null);
+			pendingBoop = true;
+			return;
+		}
+
 		// In-bank operations while banking is locked. Only coin ops (and incineration of
 		// coins) are normally allowed; one-shot deposit/withdrawal passes can be redeemed
 		// here to allow a single non-coin deposit or withdrawal action.
-		if (!banking && (goal != null || hasBankPasses) && client.getWidget(12, 0) != null)
+		if (!banking && client.getWidget(12, 0) != null)
 		{
 			final boolean isCoins = target.contains("coins");
 			final boolean isWithdraw = option.startsWith("withdraw");
 			final boolean isDeposit = option.startsWith("deposit");
 			final boolean isDestroy = option.equals("destroy");
 
+			// Stale bank window: the goal was just cleared (or passes spent) but the bank
+			// hasn't force-closed yet (that happens on the next game tick). Block all item
+			// operations during this race window to prevent free withdraws/deposits.
+			if (goal == null && !hasBankPasses)
+			{
+				if (isWithdraw || isDeposit || isDestroy)
+				{
+					event.consume();
+					pendingBoop = true;
+					return;
+				}
+			}
+			else
+			{
 			if (isDeposit && !isCoins)
 			{
 				final boolean hasDepositPass = upgradeManager.getConsumableCharges(Upgrade.DEPOSIT_PASS) > 0;
@@ -706,6 +748,7 @@ public class UltimateNormiePlugin extends Plugin
 					"Only coins may be incinerated while saving.", null);
 				pendingBoop = true;
 				return;
+			}
 			}
 		}
 
@@ -1154,17 +1197,17 @@ public class UltimateNormiePlugin extends Plugin
 
 	/**
 	 * Renders a 12x12 skull icon. One distinct visual per active upgrade (0..7):
-	 *   0 white | 1 yellow | 2 orange | 3 red | 4 red+horns | 5 red+horns+gold-trim |
-	 *   6 black | 7 black+horns+red-eyes
+	 *   0 white | 1 yellow | 2 orange | 3 red | 4 green | 5 blue |
+	 *   6 black | 7 black+horns
 	 */
 	private IndexedSprite createSkullIndexedSprite()
 	{
 		final int unlocked = upgradeManager.getUnlockedCount();
 		final int tier = Math.max(0, Math.min(unlocked, 7));
-		final boolean horned = (tier == 4) || (tier == 5) || (tier == 7);
-		final boolean gilded = tier == 5;
+		final boolean horned = (tier == 7);
+		final boolean gilded = false;
 		final boolean blackTheme = tier >= 6;
-		final boolean redEyes = tier == 7;
+		final boolean redEyes = false;
 		final int fillColor = pickSkullFillColor(tier);
 
 		final int w = 12;
@@ -1269,9 +1312,11 @@ public class UltimateNormiePlugin extends Plugin
 			case 0: return 0xFFFFFF; // white
 			case 1: return 0xFFEE66; // yellow
 			case 2: return 0xFF9933; // orange
+			case 4: return 0x33CC33; // green
+			case 5: return 0x3366FF; // blue
 			case 6:
 			case 7: return 0x000000; // black
-			default: return 0xCC0000; // red (3-5)
+			default: return 0xCC0000; // red (3)
 		}
 	}
 
