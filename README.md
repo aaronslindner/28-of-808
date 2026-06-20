@@ -2,42 +2,62 @@
 
 A RuneLite plugin that enforces strict UIM-style restrictions on banking, trading and the Grand Exchange, layered with a roguelike **Upgrade Mode** meta-progression.
 
-By default the plugin is fully strict: no banking, GE submissions clamped to ±10% of market price, and player trades clamped to ±10% of partner value. Upgrades are purchased per-life by incinerating coins, and **all upgrades are wiped on death**.
+By default the plugin is fully strict: no banking, GE access blocked, and player trades blocked. Upgrades are purchased per-life by incinerating coins, and **all upgrades are wiped on death**.
 
 ## How Upgrade Mode works
 
 1. Open the **UNM Upgrades** sidebar panel and click **[Set]** on an available upgrade.
 2. **Enable the Bank Incinerator** in the bank's settings (it's not on by default).
 3. Walk to a bank, open it, deposit fresh coins, then drag them onto the **incinerator**. Each coin destroyed counts toward your selected goal.
-4. **Only coins deposited during the current bank session count.** Coins already in the bank when you open it are *ineligible* — convert them to platinum tokens at a GE clerk if you want to keep them off the bank.
+4. **Only coins deposited during the current bank session count.** Coins already in the bank when you open it are *ineligible*.
 5. **Closing the bank with eligible coins still inside makes them ineligible on reopen** (so you can't bank coins between sessions; you must incinerate fully before closing).
 6. **Dying wipes all progress and active upgrades.** Start over from strict.
 
 ## Upgrade tree
 
 ```
-[Banking Unlock           1B GP]   (standalone)
+[Bank Unlock              1M GP]   (standalone)
 
-[GE Use                   1M GP]
-   └─[GE ±25%              5M GP]
-       └─[GE Removal      50M GP]
+[GE Use                 100K GP]
+   └─[GE ±25%           500K GP]
+       └─[GE Removal     1M GP]
 
-[Trade Use                1M GP]
-   └─[Trade ±25%           1M GP]
-       └─[Trade Removal   10M GP]
+[Trade Use                1K GP]
+   └─[Trade ±25%          5K GP]
+       └─[Trade Removal  10K GP]
 ```
 
 A child upgrade can only be purchased while its parent is **active this life**. Each tier strictly improves on the previous: GE/Trade `Use` unlocks access at ±10%, the `±25%` tier loosens to ±25%, and `Removal` removes the price/value enforcement entirely.
+
+### Consumable passes
+
+These single-use passes don't grant a permanent unlock; each purchase grants one action charge. Cost starts at 1K GP and rises by 1K GP per purchase this life.
+
+- **Deposit Pass** — one non-coin deposit into the UNM bank.
+- **Withdrawal Pass** — one non-coin withdrawal from the UNM bank.
+- **GE Pass** — opens one temporary Grand Exchange session; access is revoked when you close the GE.
 
 ## Features
 
 ### Banking
 
-- All banking interactions blocked unless the **Banking Unlock** upgrade is active OR a goal is selected.
-- While saving, the bank widget is allowed to open for incineration only — non-coin operations are blocked, and only coins deposited during the current session count toward the goal.
+- All banking interactions blocked unless the **Bank Unlock** upgrade is active, a goal is selected, or a one-shot Deposit/Withdrawal Pass is pending.
+- While saving, the bank widget is allowed to open for incineration only — only coins deposited during the current session count toward the goal.
+- Non-coin deposits and withdrawals are allowed one-at-a-time via **Deposit Pass** / **Withdrawal Pass**.
 - Clearing the goal while the bank is open force-closes the bank.
-- Loot chests, deposit boxes, and CoX private storage units follow the same rule.
 - Looting bag remains fully functional regardless of upgrades.
+
+### UNM Bank
+
+- Items deposited using a **Deposit Pass** are stored in the **UNM Bank** and can be withdrawn using a **Withdrawal Pass**.
+- The UNM Bank is **not** the normal bank; it is a separate stash tied to your current life.
+- Items in the UNM Bank are moved to **Purgatory** on death.
+
+### Purgatory
+
+- When you die, items in the UNM Bank move to **Purgatory**.
+- The next life can unlock Purgatory by incinerating the amount spent on deposit/withdrawal passes in the prior life (minimum 1 gp).
+- If you die again while Purgatory has items, those items are lost forever.
 
 ### Trading
 
@@ -48,17 +68,22 @@ A child upgrade can only be purchased while its parent is **active this life**. 
 
 ### Grand Exchange
 
-- GE access blocked entirely unless **GE Use** is active. Collect, Exchange, History on bankers/clerks/booths blocked too.
+- GE access blocked entirely unless **GE Use** is active or a **GE Pass** is used.
 - ±10% price tolerance by default; loosens to ±25% with **GE ±25%**; fully removed with **GE Removal**.
 - Custom-entry cooldown prevents rapid confirm after manual price/quantity entry.
+- GE **"Collect to bank"** is blocked — coins/items must be collected to inventory so the incinerator can track them.
 
 ### Cosmetic
 
-- **Chat skull icon** prepended to your in-game messages, scaled by active upgrade count:
-  - 0 active: white base skull
-  - 1–2 active: red colored skull
-  - 3–4 active: red horned skull
-  - 5+ active: gilded horned skull
+- **Chat skull icon** prepended to your in-game messages, scaled by unlocked upgrade count:
+  - 0: white
+  - 1: yellow
+  - 2: orange
+  - 3: red
+  - 4: green
+  - 5: blue
+  - 6: black
+  - 7: black horned
 - **Denial sound** (sound 2277) plays when an action is blocked.
 
 ## Persistence & data

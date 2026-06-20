@@ -613,15 +613,6 @@ public class UltimateNormiePlugin extends Plugin
 		final boolean geCollectOpen = client.getWidget(402, 0) != null
 			|| client.getWidget(383, 0) != null
 			|| client.getWidget(465, 0) != null;
-		// TEMP DEBUG: log collect/bank-related clicks so we can confirm the exact strings.
-		if (option.contains("collect") || option.contains("bank") || target.contains("coins"))
-		{
-			log.debug("GE-collect debug: option='{}', target='{}', geCollectOpen={}, w402={}, w383={}, w465={}",
-				option, target, geCollectOpen,
-				client.getWidget(402, 0) != null,
-				client.getWidget(383, 0) != null,
-				client.getWidget(465, 0) != null);
-		}
 		if (geCollectOpen && (option.contains("collect to bank")
 			|| option.equals("bank-all")
 			|| option.equals("bank")
